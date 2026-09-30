@@ -1,0 +1,306 @@
+{
+  "steps": [
+    {
+      "name": "Hook regression tests",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "{gate}",
+        "-p",
+        "test_local_ci*.py"
+      ]
+    },
+    {
+      "name": "Whitespace and conflict errors",
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "HEAD^",
+        "HEAD"
+      ]
+    },
+    {
+      "name": "Repository formatting",
+      "argv": [
+        "just",
+        "fmt-check"
+      ]
+    },
+    {
+      "name": "Cargo workspace policy",
+      "argv": [
+        "{python}",
+        "-B",
+        ".github/scripts/verify_cargo_workspace_manifests.py"
+      ]
+    },
+    {
+      "name": "TUI core boundary",
+      "argv": [
+        "{python}",
+        "-B",
+        ".github/scripts/verify_tui_core_boundary.py"
+      ]
+    },
+    {
+      "name": "Bazel/Cargo lint consistency",
+      "argv": [
+        "{python}",
+        "-B",
+        ".github/scripts/verify_bazel_clippy_lints.py"
+      ]
+    },
+    {
+      "name": "GitHub tooling tests",
+      "argv": [
+        "uv",
+        "run",
+        "--no-project",
+        "--with",
+        "packaging==26.2",
+        "python",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        ".github/scripts",
+        "-p",
+        "test_*.py"
+      ]
+    },
+    {
+      "name": "Package builder tests",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/codex_package",
+        "-p",
+        "test_*.py"
+      ]
+    },
+    {
+      "name": "Installer tests",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/install",
+        "-p",
+        "test_*.py"
+      ]
+    },
+    {
+      "name": "macOS signing tooling tests",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        ".github/scripts/macos-signing",
+        "-p",
+        "test_*.py"
+      ]
+    },
+    {
+      "name": "README character policy",
+      "argv": [
+        "{python}",
+        "-B",
+        "scripts/asciicheck.py",
+        "README.md"
+      ]
+    },
+    {
+      "name": "README table of contents",
+      "argv": [
+        "{python}",
+        "-B",
+        "scripts/readme_toc.py",
+        "README.md"
+      ]
+    },
+    {
+      "name": "Native Rust Clippy",
+      "paths": [
+        "codex-rs/*",
+        "tools/argument-comment-lint/*",
+        "justfile",
+        "*.bzl",
+        "MODULE.bazel*",
+        ".bazelrc",
+        "BUILD.bazel",
+        "defs/*",
+        "patches/*"
+      ],
+      "argv": [
+        "just",
+        "clippy",
+        "--workspace",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "timeout_seconds": 7200
+    },
+    {
+      "name": "Native Rust suite",
+      "paths": [
+        "codex-rs/*",
+        "tools/argument-comment-lint/*",
+        "justfile",
+        "*.bzl",
+        "MODULE.bazel*",
+        ".bazelrc",
+        "BUILD.bazel",
+        "defs/*",
+        "patches/*"
+      ],
+      "argv": [
+        "just",
+        "test"
+      ],
+      "timeout_seconds": 10800
+    },
+    {
+      "name": "Argument comment lint",
+      "paths": [
+        "codex-rs/*",
+        "tools/argument-comment-lint/*",
+        "justfile",
+        "*.bzl",
+        "MODULE.bazel*",
+        ".bazelrc",
+        "BUILD.bazel",
+        "defs/*",
+        "patches/*"
+      ],
+      "argv": [
+        "just",
+        "argument-comment-lint"
+      ],
+      "timeout_seconds": 7200
+    },
+    {
+      "name": "SDK CLI binaries",
+      "paths": [
+        "sdk/*",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "package.json"
+      ],
+      "cwd": "codex-rs",
+      "argv": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bin",
+        "codex",
+        "--bin",
+        "codex-code-mode-host"
+      ],
+      "timeout_seconds": 7200
+    },
+    {
+      "name": "TypeScript SDK build",
+      "paths": [
+        "sdk/typescript/*",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "package.json"
+      ],
+      "argv": [
+        "pnpm",
+        "--filter",
+        "./sdk/typescript",
+        "run",
+        "build"
+      ]
+    },
+    {
+      "name": "TypeScript SDK lint",
+      "paths": [
+        "sdk/typescript/*",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "package.json"
+      ],
+      "argv": [
+        "pnpm",
+        "--filter",
+        "./sdk/typescript",
+        "run",
+        "lint"
+      ]
+    },
+    {
+      "name": "TypeScript SDK tests",
+      "paths": [
+        "sdk/typescript/*",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "package.json"
+      ],
+      "argv": [
+        "pnpm",
+        "--filter",
+        "./sdk/typescript",
+        "run",
+        "test",
+        "--runInBand"
+      ],
+      "env": {
+        "CODEX_EXEC_PATH": "{codex}"
+      }
+    },
+    {
+      "name": "Python SDK lint",
+      "paths": [
+        "sdk/python/*"
+      ],
+      "cwd": "sdk/python",
+      "argv": [
+        "uv",
+        "run",
+        "--frozen",
+        "--only-group",
+        "dev",
+        "ruff",
+        "check",
+        "."
+      ]
+    },
+    {
+      "name": "Python SDK tests",
+      "paths": [
+        "sdk/python/*"
+      ],
+      "cwd": "sdk/python",
+      "argv": [
+        "uv",
+        "run",
+        "--frozen",
+        "--only-group",
+        "dev",
+        "pytest"
+      ],
+      "env": {
+        "CODEX_EXEC_PATH": "{codex}"
+      }
+    }
+  ]
+}

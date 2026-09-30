@@ -1,8 +1,35 @@
+# Local CI: Git pre-push hook
+
+- Hosted GitHub Actions are disabled in `phoenixzqy/zai-codex`; local pre-push
+  validation is the CI gate. Keep this policy when syncing upstream workflows.
+- Install the tracked hook in every clone before pushing:
+  `python3 -B .github/scripts/local_ci.py --install` (use `python` on Windows).
+  The installer preserves existing custom hook configurations. Linked worktrees
+  share repository-local Git configuration. The installer keeps an executable
+  fallback in the common Git directory so upstream-only `main` is also gated.
+- `.github/local-ci.json` is the maintained command list. Repository checks run
+  on every push; Rust/SDK suites run when those areas change. New refs run all
+  checks applicable to their tracked files. Manual runs check all areas. Run
+  `python3 -B .github/scripts/local_ci.py` for complete development validation.
+  Before a Rust-changing push, ensure the complete native suite is authorized.
+  Install Python 3.10+, Git, `just`, `uv`, DotSlash, the pinned Rust toolchain,
+  cargo-nextest, and Bazel for Rust lint checks. For SDK changes, also install
+  Node/pnpm and run `pnpm install --frozen-lockfile` before pushing. `uv` uses
+  frozen Python project locks; the gate never refreshes dependency locks.
+  The hook validates the checked-out outgoing commit, requires a clean index and
+  worktree before and after checks, streams failures, and blocks a failed push.
+  Do not bypass it with `--no-verify` or a temporary `core.hooksPath` override.
+- Local CI provides native-host evidence; Linux success does not establish
+  Windows or macOS runtime correctness. Hooks cannot enforce browser edits or
+  forge-side merges. Upstream workflows are retained for reference, not run in
+  this fork. Never rely on hosted CI to catch an omitted local check.
+
 # Branch policy
 
 - Reserve `main` exclusively for syncing `openai/codex` upstream `main`. Keep it free of fork-specific commits and repository instructions.
-- Develop and iterate fork customizations on `zai-codex`. Unless the user explicitly requests another target, base customization branches on `zai-codex` and target customization pull requests at `zai-codex`, not `main`.
+- The repository default branch is `zai-codex`. Develop and iterate fork customizations there. Unless the user explicitly requests another target, base customization branches on `zai-codex` and target customization pull requests at `zai-codex`, not `main`.
 - Keep `upstream` pointing to `openai/codex` and `origin` pointing to `phoenixzqy/zai-codex`. Sync `main` without rewriting history, then integrate upstream changes into `zai-codex` separately and revalidate the customizations.
+- Use `.codex/skills/sync-upstream/SKILL.md` when syncing upstream. Resolve conflicts in favor of the `zai-codex` customization intent while retaining compatible upstream improvements.
 - Perform repository changes in a claimed isolated worktree; preserve the shared checkout and other sessions' work.
 
 # Rust/codex-rs
@@ -24,7 +51,7 @@ In the codex-rs folder where the rust code lives:
   - A method's sole non-self argument is exempt when the method and parameter names match, such as `.enabled(false)` for `fn enabled(&self, enabled: bool)`.
   - Do not add these comments for string or char literals unless the comment adds real clarity; those literals are intentionally exempt from the lint.
   - The parameter name in the comment must exactly match the callee signature.
-  - You can run `just argument-comment-lint` to run the lint check locally. This is powered by Bazel, so running it the first time can be slow if Bazel is not warmed up, though incremental invocations should take <15s. Most of the time, it is best to update the PR and let CI take responsibility for checking this (or run it asynchronously in the background after submitting the PR). Note CI checks all three platforms, which the local run does not.
+  - You can run `just argument-comment-lint` to run the lint check locally. This is powered by Bazel, so running it the first time can be slow if Bazel is not warmed up, though incremental invocations should take <15s. Run it locally for relevant Rust changes; hosted CI is disabled in this fork. The local run checks only its host platform.
 - When possible, make `match` statements exhaustive and avoid wildcard arms.
 - Newly added traits should include doc comments that explain their role and how implementations are expected to use them.
 - Discourage both `#[async_trait]` and `#[allow(async_fn_in_trait)]` in Rust traits.

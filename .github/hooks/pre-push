@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+root=$(git rev-parse --show-toplevel)
+common=$(git rev-parse --git-common-dir)
+runner="$root/.github/scripts/local_ci.py"
+if [ ! -f "$runner" ]; then
+    runner="$common/local-ci/scripts/local_ci.py"
+fi
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 -B "$runner" --root "$root" --pre-push
+elif command -v python >/dev/null 2>&1; then
+    exec python -B "$runner" --root "$root" --pre-push
+else
+    echo "Python 3.10+ is required for pre-push validation." >&2
+    exit 1
+fi
