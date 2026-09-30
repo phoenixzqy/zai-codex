@@ -13,7 +13,8 @@
   `python3 -B .github/scripts/local_ci.py` for complete development validation.
   Before a Rust-changing push, ensure the complete native suite is authorized.
   Install Python 3.10+, Git, `just`, `uv`, DotSlash, the pinned Rust toolchain,
-  cargo-nextest, and Bazel for Rust lint checks. For SDK changes, also install
+  cargo-nextest, and Bazel for Rust lint checks. POSIX signing-tool tests also
+  need Bash, OpenSSL, and zip. For SDK changes, also install
   Node/pnpm and run `pnpm install --frozen-lockfile` before pushing. `uv` uses
   frozen Python project locks; the gate never refreshes dependency locks.
   The hook validates the checked-out outgoing commit, requires a clean index and

@@ -201,6 +201,7 @@ def run_step(root: Path, step: dict, output: Path) -> None:
             for key, value in step.get("env", {}).items()
         }
     )
+    env["CODEX_REPO_ROOT"] = str(root)
     env["PYTHONUNBUFFERED"] = "1"
     print(f"\n== {step['name']} ==\n{' '.join(args)}", flush=True)
     options = {"stdin": subprocess.DEVNULL}

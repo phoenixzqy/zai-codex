@@ -114,6 +114,10 @@
         ".github/scripts/macos-signing",
         "-p",
         "test_*.py"
+      ],
+      "platforms": [
+        "linux",
+        "darwin"
       ]
     },
     {
