@@ -3,7 +3,6 @@ use std::time::Duration;
 use anyhow::Result;
 use anyhow::bail;
 use app_test_support::ChatGptAuthFixture;
-use app_test_support::DEFAULT_CLIENT_NAME;
 use app_test_support::TestAppServer;
 use app_test_support::start_analytics_events_server;
 use app_test_support::write_chatgpt_auth;
@@ -12,7 +11,6 @@ use codex_app_server_protocol::PluginUninstallResponse;
 use codex_app_server_protocol::RequestId;
 use codex_config::types::AuthCredentialsStoreMode;
 use pretty_assertions::assert_eq;
-use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use wiremock::Mock;
@@ -92,40 +90,17 @@ async fn plugin_uninstall_tracks_analytics_event() -> Result<()> {
     let response = uninstall_plugin(&mut mcp, "sample-plugin@debug").await?;
     assert_eq!(response, PluginUninstallResponse {});
 
-    let payload = timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            let Some(requests) = analytics_server.received_requests().await else {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                continue;
-            };
-            if let Some(request) = requests.iter().find(|request| {
-                request.method == "POST" && request.url.path() == "/codex/analytics-events/events"
-            }) {
-                break request.body.clone();
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await?;
-    let payload: serde_json::Value = serde_json::from_slice(&payload).expect("analytics payload");
     assert_eq!(
-        payload,
-        json!({
-            "events": [{
-                "event_type": "codex_plugin_uninstalled",
-                "event_params": {
-                    "plugin_id": "sample-plugin@debug",
-                    "remote_plugin_id": null,
-                    "plugin_name": "sample-plugin",
-                    "marketplace_name": "debug",
-                    "has_skills": false,
-                    "mcp_server_count": 0,
-                    "connector_ids": [],
-                    "product_client_id": DEFAULT_CLIENT_NAME,
-                }
-            }]
-        })
+        analytics_server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| request.url.path() == "/codex/analytics-events/events")
+            .count(),
+        0,
     );
+
     Ok(())
 }
 
@@ -240,25 +215,7 @@ async fn plugin_uninstall_writes_remote_plugin_to_cloud_when_remote_plugin_enabl
     .await?;
     assert!(!remote_plugin_cache_root.exists());
     assert!(!legacy_remote_plugin_cache_root.exists());
-    let payload = wait_for_plugin_analytics_payload(&server).await?;
-    assert_eq!(
-        payload,
-        json!({
-            "events": [{
-                "event_type": "codex_plugin_uninstalled",
-                "event_params": {
-                    "plugin_id": "linear@openai-curated-remote",
-                    "remote_plugin_id": REMOTE_PLUGIN_ID,
-                    "plugin_name": "linear",
-                    "marketplace_name": "openai-curated-remote",
-                    "has_skills": true,
-                    "mcp_server_count": 0,
-                    "connector_ids": [],
-                    "product_client_id": DEFAULT_CLIENT_NAME,
-                }
-            }]
-        })
-    );
+
     Ok(())
 }
 
@@ -661,29 +618,6 @@ async fn mount_remote_plugin_detail_with_name(
         .respond_with(ResponseTemplate::new(200).set_body_string(detail_body))
         .mount(server)
         .await;
-}
-
-async fn wait_for_plugin_analytics_payload(server: &MockServer) -> Result<serde_json::Value> {
-    timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            let Some(requests) = server.received_requests().await else {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                continue;
-            };
-            if let Some(request) = requests.iter().find(|request| {
-                request.method == "POST"
-                    && request
-                        .url
-                        .path()
-                        .ends_with("/codex/analytics-events/events")
-            }) {
-                return serde_json::from_slice(&request.body)
-                    .map_err(|err| anyhow::anyhow!("invalid analytics payload: {err}"));
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await?
 }
 
 async fn wait_for_remote_plugin_request_count(

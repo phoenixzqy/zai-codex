@@ -152,9 +152,9 @@ async fn live_fork_keeps_instructions_when_source_is_unloaded_during_setup() {
         .expect("shutdown fork");
 }
 
-/// A thread opt-out wins over a shared client without disabling its siblings.
+/// Reporting stays disabled across thread overrides and shared clients.
 #[tokio::test]
-async fn thread_analytics_opt_out_overrides_shared_client() {
+async fn thread_reporting_overrides_cannot_enable_delivery() {
     let server = MockServer::start().await;
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .and(wiremock::matchers::path("/codex/analytics-events/events"))
@@ -171,21 +171,19 @@ async fn thread_analytics_opt_out_overrides_shared_client() {
         server.uri(),
         /*analytics_enabled*/ Some(true),
     );
-    let mut expected_thread_ids = Vec::new();
-    let mut opted_out_thread_ids = Vec::new();
 
     for (name, client_override, expected_enabled) in [
         (
             "enabled_override",
             Some(shared_client.clone()),
-            [false, true, true],
+            [false, false, false],
         ),
         (
             "disabled_override",
             Some(AnalyticsEventsClient::disabled()),
             [false, false, false],
         ),
-        ("no_override", None, [false, true, true]),
+        ("no_override", None, [false, false, false]),
     ] {
         config.codex_home = temp_dir.path().join(name).abs();
         config.cwd = config.codex_home.abs();
@@ -220,11 +218,6 @@ async fn thread_analytics_opt_out_overrides_shared_client() {
                 enabled,
             );
             let thread_id = started.thread_id.to_string();
-            if enabled {
-                expected_thread_ids.push(thread_id.clone());
-            } else {
-                opted_out_thread_ids.push(thread_id.clone());
-            }
             services.analytics_events_client.track_app_used(
                 codex_analytics::TrackEventsContext {
                     turn_metadata: None,
@@ -248,37 +241,12 @@ async fn thread_analytics_opt_out_overrides_shared_client() {
         assert_eq!(shutdown.completed.len(), 3);
     }
 
-    let events: Vec<serde_json::Value> = server
-        .received_requests()
-        .await
-        .expect("analytics requests")
-        .into_iter()
-        .filter(|request| request.url.path() == "/codex/analytics-events/events")
-        .flat_map(|request| {
-            request.body_json::<serde_json::Value>().expect("JSON body")["events"]
-                .as_array()
-                .expect("events array")
-                .clone()
-        })
-        .collect();
-    assert!(events.iter().all(|event| {
-        !opted_out_thread_ids
+    let requests = server.received_requests().await.expect("recorded requests");
+    assert!(
+        requests
             .iter()
-            .any(|thread_id| event["event_params"]["thread_id"] == thread_id.as_str())
-    }));
-    let mut actual_thread_ids: Vec<String> = events
-        .iter()
-        .filter(|event| event["event_type"] == "codex_app_used")
-        .map(|event| {
-            event["event_params"]["thread_id"]
-                .as_str()
-                .expect("app usage thread ID")
-                .to_string()
-        })
-        .collect();
-    actual_thread_ids.sort();
-    expected_thread_ids.sort();
-    assert_eq!(actual_thread_ids, expected_thread_ids);
+            .all(|request| request.url.path() != "/codex/analytics-events/events")
+    );
 }
 
 /// Controls without a custom allocation policy still produce distinct thread identifiers.

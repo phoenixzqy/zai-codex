@@ -53,7 +53,6 @@ mod experimental_api;
 mod experimental_feature_list;
 mod external_agent_config;
 mod external_agent_import_sync;
-mod feedback;
 mod fs;
 #[path = "gateway_oauth_tests.rs"]
 mod gateway_oauth;
@@ -85,7 +84,6 @@ mod model_provider_capabilities_read;
 #[path = "model_provider_enforcement_tests.rs"]
 mod model_provider_enforcement;
 mod multi_agent_v2_developer_instructions;
-mod otel;
 mod output_schema;
 mod permission_profile_list;
 mod plan_item;
@@ -151,7 +149,6 @@ mod thread_status;
 mod thread_timeline;
 mod thread_unarchive;
 mod thread_unsubscribe;
-mod turn_cost_otel;
 mod turn_interrupt;
 mod turn_settings_update;
 mod turn_start;

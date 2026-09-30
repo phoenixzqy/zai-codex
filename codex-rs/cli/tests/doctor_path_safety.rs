@@ -660,7 +660,10 @@ async fn feedback_with_logs_does_not_execute_path_helpers() -> Result<()> {
         app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
-    assert!(error.error.message.contains("failed to upload feedback"));
+    assert_eq!(
+        error.error.message,
+        "sending feedback is disabled by configuration"
+    );
     assert!(!fixture.marker.exists(), "feedback executed a PATH helper");
     timeout(
         Duration::from_secs(/*secs*/ 10),

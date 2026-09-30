@@ -594,7 +594,7 @@ fn build_otlp_metric_exporter(
     temporality: Temporality,
     factory: &codex_http_client::HttpClientFactory,
 ) -> Result<opentelemetry_otlp::MetricExporter> {
-    match exporter {
+    match crate::config::resolve_exporter(&exporter) {
         OtelExporter::None => Err(MetricsError::ExporterDisabled),
         OtelExporter::Statsig => build_otlp_metric_exporter(
             crate::config::resolve_exporter(&OtelExporter::Statsig),

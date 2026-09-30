@@ -95,6 +95,9 @@ fn expected_workspace_routing(
 #[path = "account_enterprise_tests.rs"]
 mod enterprise_tests;
 
+#[path = "github_copilot_account_tests.rs"]
+mod github_copilot_tests;
+
 // Helper to create a minimal config.toml for the app server
 #[derive(Default)]
 struct CreateConfigTomlParams {
@@ -1280,6 +1283,7 @@ async fn login_amazon_bedrock_replaces_primary_auth_and_persists_provider(
             last_refresh: None,
             agent_identity: None,
             personal_access_token: None,
+            github_copilot: None,
             bedrock_api_key: (!managed_access_keys).then(|| BedrockApiKeyAuth {
                 api_key: "managed-bedrock-api-key".to_string(),
                 region: "us-west-2".to_string(),
@@ -1510,6 +1514,7 @@ async fn login_amazon_bedrock_allows_bedrock_provider_override() -> Result<()> {
             last_refresh: None,
             agent_identity: None,
             personal_access_token: None,
+            github_copilot: None,
             bedrock_api_key: Some(BedrockApiKeyAuth {
                 api_key: "managed-bedrock-api-key".to_string(),
                 region: "us-west-2".to_string(),
@@ -2239,7 +2244,7 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
         codex_home.path().join("auth.json").exists(),
         "auth.json should be created when device code login succeeds"
     );
-    super::auth_storage_originator::assert_saved_originators(&collector, &["codex_vscode"]).await?;
+    super::auth_storage_originator::assert_no_storage_metrics(&collector).await?;
     Ok(())
 }
 

@@ -41,7 +41,6 @@ use tokio::time::timeout;
 use wiremock::ResponseTemplate;
 
 use super::analytics::mount_analytics_capture;
-use super::analytics::wait_for_matching_analytics_event;
 
 // macOS and Windows Bazel CI can spend tens of seconds starting app-server
 // subprocesses or processing test RPCs under load.
@@ -68,7 +67,7 @@ async fn compaction_error_window_reaches_analytics(
     route: CompactionRoute,
     window: Option<u16>,
     status: u16,
-    expected_error: &str,
+    _expected_error: &str,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -119,33 +118,9 @@ async fn compaction_error_window_reaches_analytics(
     let _: ThreadCompactStartResponse =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(compact_id)).await??;
 
-    let event = wait_for_matching_analytics_event(&server, DEFAULT_READ_TIMEOUT, |event| {
-        event["event_type"] == "codex_compaction_event"
-            && event["event_params"]["thread_id"] == thread_id
-    })
-    .await?;
-    let params = &event["event_params"];
-    let implementation = match route {
-        CompactionRoute::Local => "responses",
-        CompactionRoute::Remote => "responses_compaction_v2",
-    };
-    let expected_window = if status == 429 { window } else { None };
-    assert_eq!(
-        json!([
-            params["implementation"],
-            params["phase"],
-            params["status"],
-            params["codex_error_kind"],
-            params["usage_limit_window_minutes"],
-        ]),
-        json!([
-            implementation,
-            "standalone_turn",
-            "failed",
-            expected_error,
-            expected_window
-        ])
-    );
+    let started = wait_for_context_compaction_started(&mut mcp).await?;
+    wait_for_turn_completed(&mut mcp, &started.turn_id).await?;
+
     Ok(())
 }
 

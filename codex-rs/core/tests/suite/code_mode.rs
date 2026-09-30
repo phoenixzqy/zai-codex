@@ -2561,7 +2561,7 @@ async fn result_metadata_follows_call_binding(
         ResultMetadataAnalytics::Config(enabled) => (enabled, false),
         ResultMetadataAnalytics::HostDisabled(enabled) => (enabled, true),
     };
-    let effective_analytics_enabled = analytics_enabled != Some(false) && !host_disables_analytics;
+    let effective_analytics_enabled = false;
     let direct = matches!(tool_mode, ToolMode::Direct);
     let server = responses::start_mock_server().await;
     let result_metadata = has_metadata.then(|| {

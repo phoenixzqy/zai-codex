@@ -77,8 +77,7 @@ fn shutdown_buffers_until_replacement_and_preserves_newer_installations() {
 }
 
 #[test]
-fn rejected_opt_out_preserves_recording_and_accepted_opt_out_survives_shutdown() {
-    let metrics = install();
+fn configured_exporters_remain_opted_out_across_shutdown() {
     let mut settings = OtelSettings {
         http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
         environment: "test".to_string(),
@@ -97,21 +96,6 @@ fn rejected_opt_out_preserves_recording_and_accepted_opt_out_survives_shutdown()
         span_attributes: BTreeMap::from([(String::new(), "invalid".to_string())]),
         tracestate: BTreeMap::new(),
     };
-    assert_eq!(
-        OtelProvider::try_new(&settings).err().unwrap().to_string(),
-        "configured span attribute key must not be empty"
-    );
-    observe();
-    assert_eq!(totals(&metrics), (1, 1, 7.0));
-
-    metrics.shutdown().unwrap();
-    observe();
-    assert!(OtelProvider::try_new(&settings).is_err());
-    let replacement = install();
-    assert_eq!(totals(&replacement), (1, 1, 7.0));
-    replacement.shutdown().unwrap();
-
-    settings.span_attributes.clear();
     for trace_exporter in [settings.trace_exporter.clone(), OtelExporter::None] {
         let metrics = install();
         settings.trace_exporter = trace_exporter;

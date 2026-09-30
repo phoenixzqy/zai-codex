@@ -737,7 +737,7 @@ async fn direct_metadata_limit_respects_provider_support(
         .with_config(configure_metadata.clone());
     // build() always selects the local test environment; all network destinations are the mock.
     let test = builder.build(&server).await?;
-    assert!(test.codex.analytics_enabled());
+    assert!(!test.codex.analytics_enabled());
     wait_for_mcp_server(&test.codex, CODEX_APPS_MCP_SERVER_NAME).await?;
     test.submit_turn_with_approval_and_permission_profile(
         "Use [$calendar](app://calendar) to list events twice.",
@@ -792,28 +792,17 @@ async fn direct_metadata_limit_respects_provider_support(
         );
         let wire_result_metadata =
             wire_metadata["executed_tool_calls"][0].get("tool_result_metadata");
-        if include_internal_metadata {
-            assert_eq!(wire_result_metadata, Some(&metadata_for_query(query)));
-        } else {
-            // An ungranted provider must not receive internal result metadata.
-            assert!(wire_result_metadata.is_none());
-        }
+        assert!(wire_result_metadata.is_none());
     }
     let first_metadata = tool_call_metadata(recorded_outputs[0].clone());
     let second_metadata = tool_call_metadata(recorded_outputs[1].clone());
-    assert_eq!(
-        first_metadata["executed_tool_calls"][0]["tool_result_metadata"],
-        metadata_for_query("first")
-    );
-    let marker = second_metadata["executed_tool_calls"][0]["tool_result_metadata"]
-        .as_str()
-        .expect("second result should have an omission marker");
-    let overage = marker
-        .strip_prefix("omitted_due_to_size_limit (overage_bytes=")
-        .and_then(|value| value.strip_suffix(')'))
-        .and_then(|value| value.parse::<usize>().ok())
-        .expect("marker should report omitted bytes");
-    assert!(overage > 0);
+    for metadata in [&first_metadata, &second_metadata] {
+        assert!(
+            metadata["executed_tool_calls"][0]
+                .get("tool_result_metadata")
+                .is_none()
+        );
+    }
     if !include_internal_metadata {
         return Ok(());
     }
@@ -921,9 +910,10 @@ async fn direct_metadata_limit_respects_provider_support(
             metadata["executed_tool_calls"][0]["arguments"],
             json!({"query": query})
         );
-        assert_eq!(
-            metadata["executed_tool_calls"][0]["tool_result_metadata"],
-            metadata_for_query(query)
+        assert!(
+            metadata["executed_tool_calls"][0]
+                .get("tool_result_metadata")
+                .is_none()
         );
     }
     Ok(())

@@ -9,7 +9,6 @@ use std::time::Duration;
 use anyhow::Result;
 use anyhow::bail;
 use app_test_support::ChatGptAuthFixture;
-use app_test_support::DEFAULT_CLIENT_NAME;
 use app_test_support::TestAppServer;
 use app_test_support::start_analytics_events_server;
 use app_test_support::write_chatgpt_auth;
@@ -587,22 +586,6 @@ async fn plugin_install_tracks_analytics_when_remote_detail_fetch_fails() -> Res
     assert_eq!(err.error.code, -32600);
     assert!(err.error.message.contains("failed with status 404"));
 
-    let payload = wait_for_plugin_analytics_payload(&server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], json!(null));
-    assert_eq!(event_params["remote_plugin_id"], REMOTE_PLUGIN_ID);
-    assert_eq!(event_params["plugin_name"], json!(null));
-    assert_eq!(event_params["marketplace_name"], json!(null));
-    assert_eq!(event_params["source"], "manual");
-    assert_eq!(
-        event_params["error_type"],
-        "remote_catalog_unexpected_status"
-    );
-    assert_eq!(event_params["sub_error_type"], "http_404");
     Ok(())
 }
 
@@ -659,21 +642,7 @@ async fn plugin_install_tracks_analytics_when_remote_install_is_rate_limited() -
         /*expected_count*/ 1,
     )
     .await?;
-    let payload = wait_for_plugin_analytics_payload(&server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], "linear@openai-curated-remote");
-    assert_eq!(event_params["remote_plugin_id"], REMOTE_PLUGIN_ID);
-    assert_eq!(event_params["marketplace_name"], "openai-curated-remote");
-    assert_eq!(event_params["source"], "manual");
-    assert_eq!(
-        event_params["error_type"],
-        "remote_catalog_unexpected_status"
-    );
-    assert_eq!(event_params["sub_error_type"], "http_429");
+
     Ok(())
 }
 
@@ -734,16 +703,7 @@ async fn plugin_install_rejects_remote_plugin_disabled_by_admin_before_download(
             .join("plugins/cache/openai-curated-remote/linear")
             .exists()
     );
-    let payload = wait_for_plugin_analytics_payload(&server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], "linear@openai-curated-remote");
-    assert_eq!(event_params["remote_plugin_id"], REMOTE_PLUGIN_ID);
-    assert_eq!(event_params["error_type"], "remote_plugin_not_available");
-    assert_eq!(event_params["sub_error_type"], "disabled_by_admin");
+
     Ok(())
 }
 
@@ -783,19 +743,7 @@ async fn plugin_install_rejects_remote_plugin_not_available() -> Result<()> {
         /*expected_count*/ 0,
     )
     .await?;
-    let payload = wait_for_plugin_analytics_payload(&server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], "linear@openai-curated-remote");
-    assert_eq!(event_params["remote_plugin_id"], REMOTE_PLUGIN_ID);
-    assert_eq!(event_params["error_type"], "remote_plugin_not_available");
-    assert_eq!(
-        event_params["sub_error_type"],
-        "install_policy_not_available"
-    );
+
     Ok(())
 }
 
@@ -872,20 +820,6 @@ async fn plugin_install_tracks_analytics_when_marketplace_file_cannot_be_read() 
             .contains("failed to read marketplace file")
     );
 
-    let payload =
-        wait_for_plugin_analytics_payload(&analytics_server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], json!(null));
-    assert_eq!(event_params["remote_plugin_id"], json!(null));
-    assert_eq!(event_params["error_type"], "marketplace_io");
-    assert_eq!(
-        event_params["sub_error_type"],
-        "failed_to_read_marketplace_file"
-    );
     Ok(())
 }
 
@@ -1027,26 +961,6 @@ async fn plugin_install_tracks_analytics_event() -> Result<()> {
         timeout(DEFAULT_TIMEOUT, mcp.read_response(request_id)).await??;
     assert_eq!(response.apps_needing_auth, Vec::<AppSummary>::new());
 
-    let payload =
-        wait_for_plugin_analytics_payload(&analytics_server, "codex_plugin_installed").await?;
-    assert_eq!(
-        payload,
-        json!({
-            "events": [{
-                "event_type": "codex_plugin_installed",
-                "event_params": {
-                    "plugin_id": "sample-plugin@debug",
-                    "remote_plugin_id": null,
-                    "plugin_name": "sample-plugin",
-                    "marketplace_name": "debug",
-                    "has_skills": false,
-                    "mcp_server_count": 0,
-                    "connector_ids": [],
-                    "product_client_id": DEFAULT_CLIENT_NAME,
-                }
-            }]
-        })
-    );
     Ok(())
 }
 
@@ -1096,23 +1010,6 @@ async fn plugin_install_failure_tracks_analytics_event() -> Result<()> {
     .await??;
     assert_eq!(err.error.code, -32600);
 
-    let payload =
-        wait_for_plugin_analytics_payload(&analytics_server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], "sample-plugin@debug");
-    assert_eq!(event_params["remote_plugin_id"], json!(null));
-    assert_eq!(event_params["plugin_name"], "sample-plugin");
-    assert_eq!(event_params["marketplace_name"], "debug");
-    assert_eq!(event_params["has_skills"], json!(null));
-    assert_eq!(event_params["mcp_server_count"], json!(null));
-    assert_eq!(event_params["connector_ids"], json!(null));
-    assert_eq!(event_params["product_client_id"], DEFAULT_CLIENT_NAME);
-    assert_eq!(event_params["source"], "manual");
-    assert_eq!(event_params["error_type"], "store_invalid");
     Ok(())
 }
 
@@ -1154,25 +1051,6 @@ async fn plugin_install_tracks_remote_plugin_analytics_event() -> Result<()> {
         json!({"install_attempt_id": INSTALL_ATTEMPT_ID})
     );
 
-    let payload = wait_for_plugin_analytics_payload(&server, "codex_plugin_installed").await?;
-    assert_eq!(
-        payload,
-        json!({
-            "events": [{
-                "event_type": "codex_plugin_installed",
-                "event_params": {
-                    "plugin_id": "linear@openai-curated-remote",
-                    "remote_plugin_id": REMOTE_PLUGIN_ID,
-                    "plugin_name": "linear",
-                    "marketplace_name": "openai-curated-remote",
-                    "has_skills": true,
-                    "mcp_server_count": 0,
-                    "connector_ids": [],
-                    "product_client_id": DEFAULT_CLIENT_NAME,
-                }
-            }]
-        })
-    );
     Ok(())
 }
 
@@ -1232,18 +1110,7 @@ async fn plugin_install_preserves_status_when_remote_bundle_error_body_is_too_la
         /*expected_count*/ 0,
     )
     .await?;
-    let payload = wait_for_plugin_analytics_payload(&server, "codex_plugin_install_failed").await?;
-    let event_params = &payload["events"][0]["event_params"];
-    assert_eq!(
-        payload["events"][0]["event_type"],
-        "codex_plugin_install_failed"
-    );
-    assert_eq!(event_params["plugin_id"], "linear@openai-curated-remote");
-    assert_eq!(event_params["remote_plugin_id"], REMOTE_PLUGIN_ID);
-    assert_eq!(event_params["marketplace_name"], "openai-curated-remote");
-    assert_eq!(event_params["source"], "manual");
-    assert_eq!(event_params["error_type"], "remote_bundle_download_status");
-    assert_eq!(event_params["sub_error_type"], "http_5xx");
+
     assert!(
         !codex_home
             .path()
@@ -2765,69 +2632,6 @@ async fn mount_backend_analytics_events(server: &MockServer) {
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"status":"ok"}"#))
         .mount(server)
         .await;
-}
-
-async fn wait_for_plugin_analytics_payload(
-    server: &MockServer,
-    event_type: &str,
-) -> Result<serde_json::Value> {
-    timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            let Some(requests) = server.received_requests().await else {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                continue;
-            };
-            for request in requests.iter().filter(|request| {
-                request.method == "POST"
-                    && request
-                        .url
-                        .path()
-                        .ends_with("/codex/analytics-events/events")
-            }) {
-                let mut payload: serde_json::Value = serde_json::from_slice(&request.body)
-                    .map_err(|err| anyhow::anyhow!("invalid analytics payload: {err}"))?;
-                let events = payload["events"]
-                    .as_array_mut()
-                    .ok_or_else(|| anyhow::anyhow!("analytics payload missing events array"))?;
-                events.retain(|event| event["event_type"] == event_type);
-                if !events.is_empty() {
-                    return Ok(payload);
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await?
-}
-
-#[tokio::test]
-async fn plugin_analytics_wait_ignores_unrelated_requests_and_batched_events() -> Result<()> {
-    let server = MockServer::start().await;
-    mount_backend_analytics_events(&server).await;
-    let client = HttpClientBuilder::new().build_direct()?;
-    let expected = json!({
-        "event_type": "codex_plugin_install_failed",
-        "event_params": {"plugin_id": "sample-plugin@debug"}
-    });
-    for events in [
-        json!([{"event_type": "codex_turn_event"}]),
-        json!([{"event_type": "codex_thread_initialized"}, expected.clone()]),
-    ] {
-        client
-            .post(format!(
-                "{}/backend-api/codex/analytics-events/events",
-                server.uri()
-            ))
-            .json(&json!({"events": events}))
-            .send()
-            .await?
-            .error_for_status()?;
-    }
-    assert_eq!(
-        wait_for_plugin_analytics_payload(&server, "codex_plugin_install_failed").await?,
-        json!({"events": [expected]})
-    );
-    Ok(())
 }
 
 async fn oauth_discovery_request_count(server: &MockServer) -> usize {

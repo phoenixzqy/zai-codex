@@ -1,16 +1,3 @@
-use crate::events::AppServerRpcTransport;
-use crate::events::CodexRuntimeMetadata;
-use crate::events::GuardianReviewEventParams;
-use crate::guardian_v2::GuardianV2Event;
-use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::ClientResponsePayload;
-use codex_app_server_protocol::InitializeParams;
-use codex_app_server_protocol::JSONRPCErrorError;
-use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ServerRequest;
-use codex_app_server_protocol::ServerResponse;
-use codex_plugin::PluginTelemetryMetadata;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
@@ -18,7 +5,6 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::error::CodexErr;
 pub use codex_protocol::error::CodexErrKind;
-use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
@@ -32,7 +18,6 @@ use codex_protocol::protocol::SkillScope;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsage;
-use codex_protocol::request_permissions::RequestPermissionsResponse;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -261,39 +246,12 @@ pub struct TurnProfileFact {
 }
 
 #[derive(Clone)]
-pub struct TurnCodexErrorFact {
-    pub(crate) turn_id: String,
-    pub(crate) thread_id: String,
-    pub(crate) error: TurnCodexError,
-}
+pub struct TurnCodexErrorFact;
 
 impl TurnCodexErrorFact {
     pub fn from_codex_err(thread_id: String, turn_id: String, error: &CodexErr) -> Self {
-        Self {
-            turn_id,
-            thread_id,
-            error: TurnCodexError::from_codex_err(error),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct TurnCodexError {
-    pub(crate) kind: CodexErrKind,
-    pub(crate) http_status_code: Option<u16>,
-    pub(crate) usage_limit_window_minutes: Option<u16>,
-}
-
-impl TurnCodexError {
-    fn from_codex_err(error: &CodexErr) -> Self {
-        Self {
-            kind: error.into(),
-            http_status_code: error.http_status_code_value(),
-            usage_limit_window_minutes: match error.details() {
-                CodexErrorDetails::UsageLimitReached(error) => error.limit_window_minutes,
-                _ => None,
-            },
-        }
+        let _ = (thread_id, turn_id, error);
+        Self
     }
 }
 
@@ -537,98 +495,6 @@ pub struct CodexGoalEvent {
     pub cumulative_time_accounted_seconds: Option<i64>,
 }
 
-#[allow(dead_code)]
-pub(crate) enum AnalyticsFact {
-    Initialize {
-        connection_id: u64,
-        params: InitializeParams,
-        product_client_id: String,
-        runtime: CodexRuntimeMetadata,
-        rpc_transport: AppServerRpcTransport,
-    },
-    ClientRequest {
-        connection_id: u64,
-        request_id: RequestId,
-        request: Box<ClientRequest>,
-    },
-    ExplicitClientInterruptRequest {
-        connection_id: u64,
-        request_id: RequestId,
-        turn_id: String,
-        requested_at_ms: u64,
-    },
-    ClientResponse {
-        connection_id: u64,
-        request_id: RequestId,
-        response: Box<ClientResponsePayload>,
-        thread_originator: Option<String>,
-    },
-    ErrorResponse {
-        connection_id: u64,
-        request_id: RequestId,
-        error: JSONRPCErrorError,
-        error_type: Option<AnalyticsJsonRpcError>,
-    },
-    ServerRequest {
-        connection_id: u64,
-        request: Box<ServerRequest>,
-    },
-    ServerResponse {
-        completed_at_ms: u64,
-        response: Box<ServerResponse>,
-    },
-    EffectivePermissionsApprovalResponse {
-        completed_at_ms: u64,
-        request_id: RequestId,
-        response: Box<RequestPermissionsResponse>,
-    },
-    ServerRequestAborted {
-        completed_at_ms: u64,
-        request_id: RequestId,
-    },
-    RealtimeHandoffRequested {
-        thread_id: String,
-    },
-    Notification(Box<ServerNotification>),
-    // Facts that do not naturally exist on the app-server protocol surface, or
-    // would require non-trivial protocol reshaping on this branch.
-    Custom(CustomAnalyticsFact),
-}
-
-pub(crate) enum CustomAnalyticsFact {
-    ArtifactOperation(ArtifactOperationInput),
-    CodeModeToolCall(CodeModeToolCallFact),
-    ControlToolCall(ControlToolCallFact),
-    SubAgentThreadStarted(SubAgentThreadStartedInput),
-    Compaction(Box<CodexCompactionEvent>),
-    Goal(Box<CodexGoalEvent>),
-    ThreadHintStatus(Box<crate::thread_hint::ThreadHintStatusEvent>),
-    GuardianReview(Box<GuardianReviewEventParams>),
-    GuardianV2(Box<GuardianV2Event>),
-    TurnResolvedConfig(Box<TurnResolvedConfigFact>),
-    TurnTokenUsage(Box<TurnTokenUsageFact>),
-    TurnProfile(Box<TurnProfileFact>),
-    TurnCodexError(Box<TurnCodexErrorFact>),
-    ImagePreparation(Box<ImagePreparationFact>),
-    SkillInvoked(SkillInvokedInput),
-    AppMentioned(AppMentionedInput),
-    AppUsed(AppUsedInput),
-    McpToolCallElicitation(McpToolCallElicitation),
-    HookRun(HookRunInput),
-    PluginUsed(PluginUsedInput),
-    PluginInstallRequested(PluginInstallRequestedInput),
-    PluginStateChanged(PluginStateChangedInput),
-    PluginInstallFailed(PluginInstallFailedInput),
-    PluginMeasurements(PluginMeasurementsInput),
-    ExternalAgentConfigImportCompleted(ExternalAgentConfigImportCompletedInput),
-    ExternalAgentConfigImportFailure(ExternalAgentConfigImportFailureInput),
-}
-
-pub(crate) struct ArtifactOperationInput {
-    pub tracking: TrackEventsContext,
-    pub operation: ArtifactOperation,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct PluginMeasurementRow {
     pub measurement_name: String,
@@ -650,38 +516,12 @@ pub struct PluginMeasurementsInput {
     pub rows: Vec<PluginMeasurementRow>,
 }
 
-pub(crate) struct SkillInvokedInput {
-    pub tracking: TrackEventsContext,
-    pub invocations: Vec<SkillInvocation>,
-}
-
-pub(crate) struct AppMentionedInput {
-    pub tracking: TrackEventsContext,
-    pub mentions: Vec<AppInvocation>,
-}
-
-pub(crate) struct AppUsedInput {
-    pub tracking: TrackEventsContext,
-    pub app: AppInvocation,
-    pub elicitation_type: Option<ElicitationType>,
-}
-
-pub(crate) struct HookRunInput {
-    pub tracking: TrackEventsContext,
-    pub hook: HookRunFact,
-}
-
 pub struct HookRunFact {
     pub event_name: HookEventName,
     pub hook_source: HookSource,
     pub handler_type: HookHandlerType,
     pub execution_mode: HookExecutionMode,
     pub status: HookRunStatus,
-}
-
-pub(crate) struct PluginUsedInput {
-    pub tracking: TrackEventsContext,
-    pub plugin: PluginTelemetryMetadata,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -706,28 +546,11 @@ pub struct PluginInstallRequestedPlugin {
     pub connector_ids: Vec<String>,
 }
 
-pub(crate) struct PluginInstallRequestedInput {
-    pub tracking: TrackEventsContext,
-    pub request: PluginInstallRequested,
-}
-
-pub(crate) struct PluginStateChangedInput {
-    pub plugin: PluginTelemetryMetadata,
-    pub state: PluginState,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginInstallSource {
     Manual,
     ExternalAgentMigration,
-}
-
-pub(crate) struct PluginInstallFailedInput {
-    pub plugin: PluginTelemetryMetadata,
-    pub source: PluginInstallSource,
-    pub error_type: String,
-    pub sub_error_type: Option<String>,
 }
 
 pub struct ExternalAgentConfigImportCompletedInput {
@@ -747,12 +570,4 @@ pub struct ExternalAgentConfigImportFailureInput {
     pub failure_stage: String,
     pub error_type: String,
     pub sub_error_type: Option<String>,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum PluginState {
-    Installed,
-    Uninstalled,
-    Enabled,
-    Disabled,
 }

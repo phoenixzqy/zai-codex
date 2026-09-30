@@ -140,7 +140,7 @@ with urllib.request.urlopen(request, timeout=30) as response:
     state.allow_guardian_review.notify_one();
     let id = app_server
         .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id,
+            thread_id: thread.id.clone(),
             input: vec![UserInput::Text {
                 text: USER_CONTEXT.to_owned(),
                 text_elements: Vec::new(),
@@ -156,24 +156,7 @@ with urllib.request.urlopen(request, timeout=30) as response:
         wait_for_guardian_reviews(&state, 1 + index).await?;
         // First establish a permissive score; after overflow, establish a new one.
         state.allow_luna.notify_one();
-        timeout(TIMEOUT, async {
-            loop {
-                let events = captured_analytics_events(&analytics_server).await;
-                if events
-                    .iter()
-                    .filter(|event| {
-                        event["event_type"] == "codex_guardian_v2_classification"
-                            && event["event_params"]["outcome"] == "success"
-                    })
-                    .count()
-                    > index
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(/*millis*/ 25)).await;
-            }
-        })
-        .await?;
+        wait_for_classification_logs(codex_home.path(), &thread.id, index + 1).await?;
         gate.notify_one();
     }
     let completed: TurnCompletedNotification =

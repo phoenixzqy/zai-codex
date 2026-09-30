@@ -2,12 +2,8 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use anyhow::Result;
-use codex_analytics::AnalyticsEventsClient;
-use codex_analytics::PluginMeasurementRow;
-use codex_analytics::PluginMeasurementsInput;
 use codex_config::LoaderOverrides;
 use codex_core::TurnInputRequest;
 use codex_core::config::Config;
@@ -27,7 +23,6 @@ use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::config_types::TrustLevel;
-use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -367,105 +362,6 @@ fn searched_plugin_tools(
     )
 }
 
-#[tokio::test]
-async fn shared_analytics_client_preserves_session_products() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-    let server = start_mock_server().await;
-    Mock::given(path("/codex/analytics-events/events"))
-        .respond_with(ResponseTemplate::new(200))
-        .mount(&server)
-        .await;
-    let client = AnalyticsEventsClient::new(
-        codex_core::test_support::auth_manager_from_auth(
-            CodexAuth::create_dummy_chatgpt_auth_for_testing(),
-        ),
-        server.uri(),
-        /*analytics_enabled*/ Some(true),
-    );
-    let mut products = [Some("aeon"), Some("tpp"), None];
-    let mut sessions = Vec::new();
-    for product in products {
-        sessions.push(
-            test_codex()
-                .with_analytics_events_client(client.clone())
-                .with_config(move |config| {
-                    config.apps_mcp_product_sku = product.map(str::to_string);
-                })
-                .build_with_auto_env(&server)
-                .await?,
-        );
-    }
-    // All Sessions have registered before events are interleaved on their shared client.
-    let mut expected = Vec::new();
-    for (position, index) in [0, 1, 2, 0, 0].into_iter().enumerate() {
-        if position == 4 {
-            client.flush().await;
-            let session = &mut sessions[0];
-            session.codex.ensure_rollout_materialized().await;
-            session.codex.shutdown_and_wait().await?;
-            session
-                .thread_manager
-                .remove_thread(&session.session_configured.thread_id)
-                .await;
-            let mut config = session.config.clone();
-            config.analytics_enabled = Some(false);
-            let resumed = session
-                .thread_manager
-                .resume_legacy_thread_from_rollout(
-                    config,
-                    session.codex.rollout_path().expect("rollout path"),
-                    session.thread_manager.auth_manager(),
-                    /*parent_trace*/ None,
-                    ClientMcpExtensions::default(),
-                )
-                .await?;
-            assert_eq!(resumed.thread_id, session.session_configured.thread_id);
-            session.codex = resumed.thread;
-            products[0] = None;
-        }
-        let thread_id = sessions[index].session_configured.thread_id.to_string();
-        client.track_plugin_measurements(PluginMeasurementsInput {
-            thread_id: thread_id.clone(),
-            turn_id: "turn".into(),
-            item_id: "item".into(),
-            originator: "test_client".into(),
-            model_slug: None,
-            reasoning_effort: None,
-            plugin_id: "sample@test".into(),
-            execution_id: "execution".into(),
-            operation: "build".into(),
-            rows: vec![PluginMeasurementRow {
-                measurement_name: "duration_ms".into(),
-                number_value: 1.0,
-                dimensions: Default::default(),
-            }],
-        });
-        expected.push((thread_id, products[index].map(str::to_string)));
-    }
-    client.flush().await;
-    let mut actual = Vec::new();
-    for request in server.received_requests().await.unwrap_or_default() {
-        if request.url.path() != "/codex/analytics-events/events" {
-            continue;
-        }
-        let product = request
-            .headers
-            .get("x-openai-product-sku")
-            .map(|value| value.to_str().unwrap().to_string());
-        let body: serde_json::Value = serde_json::from_slice(&request.body)?;
-        for event in body["events"].as_array().unwrap() {
-            if event["event_type"] == "codex_plugin_measurement_event" {
-                let thread_id = event["event_params"]["thread_id"].as_str().unwrap();
-                actual.push((thread_id.to_string(), product.clone()));
-            }
-        }
-    }
-    actual.sort();
-    expected.sort();
-    assert_eq!(actual, expected);
-    Ok(())
-}
-
 #[test_case(false; "classic shell")]
 #[test_case(true; "zsh-fork shell")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -587,22 +483,6 @@ async fn persisted_remote_plugin_command_attribution_flows_through_turn_context(
         assert_eq!(script_path, Some("scripts/run.sh"));
     }
 
-    let measurement = wait_for_analytics_event(&server, "codex_plugin_measurement_event").await;
-    assert_eq!(
-        serde_json::json!({
-            "plugin_id": measurement["event_params"]["plugin_id"],
-            "operation": measurement["event_params"]["operation"],
-            "measurement_name": measurement["event_params"]["measurement_name"],
-            "number_value": measurement["event_params"]["number_value"],
-        }),
-        serde_json::json!({
-            "plugin_id": REMOTE_PLUGIN_CONFIG_NAME,
-            "operation": "scan",
-            "measurement_name": "files_scanned",
-            "number_value": 7.0,
-        })
-    );
-
     Ok(())
 }
 
@@ -723,19 +603,7 @@ printf 'STDIN_OK\n'
     let output = responses.function_call_output_text("input").unwrap();
     assert!(output.contains("Process exited with code 0"), "{output}");
     assert!(output.contains("STDIN_OK"), "{output}");
-    let measurement = wait_for_analytics_event(&server, "codex_plugin_measurement_event").await;
-    assert_eq!(
-        serde_json::json!({
-            "plugin_id": measurement["event_params"]["plugin_id"],
-            "measurement_name": measurement["event_params"]["measurement_name"],
-            "number_value": measurement["event_params"]["number_value"],
-        }),
-        serde_json::json!({
-            "plugin_id": REMOTE_PLUGIN_CONFIG_NAME,
-            "measurement_name": "files_scanned",
-            "number_value": 7.0,
-        }),
-    );
+
     Ok(())
 }
 
@@ -876,27 +744,7 @@ fi
             .unwrap()
             .contains("no metrics sidecar")
     );
-    let event = wait_for_analytics_event(&server, "codex_plugin_measurement_event").await;
-    assert_eq!(
-        serde_json::json!({
-            "plugin_id": event["event_params"]["plugin_id"],
-            "operation": event["event_params"]["operation"],
-            "measurement_name": event["event_params"]["measurement_name"],
-            "number_value": event["event_params"]["number_value"],
-            "dimensions": event["event_params"]["dimensions"],
-            "thread_id": event["event_params"]["thread_id"],
-            "item_id": event["event_params"]["item_id"],
-        }),
-        serde_json::json!({
-            "plugin_id": REMOTE_PLUGIN_CONFIG_NAME,
-            "operation": "dependency_install",
-            "measurement_name": "duration_ms",
-            "number_value": 7.0,
-            "dimensions": {"release": "v1"},
-            "thread_id": test.session_configured.thread_id.to_string(),
-            "item_id": "matching-version",
-        })
-    );
+
     Ok(())
 }
 
@@ -2180,28 +2028,6 @@ async fn explicit_plugin_mentions_track_plugin_used_analytics() -> Result<()> {
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    let event = wait_for_analytics_event(&server, "codex_plugin_used").await;
-    assert_eq!(event["event_params"]["plugin_id"], "sample@test");
-    assert_eq!(event["event_params"]["plugin_name"], "sample");
-    assert_eq!(event["event_params"]["marketplace_name"], "test");
-    assert_eq!(event["event_params"]["has_skills"], true);
-    assert_eq!(event["event_params"]["mcp_server_count"], 0);
-    assert_eq!(
-        event["event_params"]["mcp_server_names"],
-        serde_json::json!([])
-    );
-    assert_eq!(
-        event["event_params"]["connector_ids"],
-        serde_json::json!([])
-    );
-    assert_eq!(
-        event["event_params"]["product_client_id"],
-        serde_json::json!(codex_login::default_client::originator().value)
-    );
-    assert_eq!(event["event_params"]["model_slug"], "gpt-5.2");
-    assert!(event["event_params"]["thread_id"].as_str().is_some());
-    assert!(event["event_params"]["turn_id"].as_str().is_some());
-
     Ok(())
 }
 
@@ -2228,17 +2054,6 @@ async fn explicit_plugin_skill_invocation_tracks_remote_plugin_id() -> Result<()
         }]))
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    let event = wait_for_analytics_event(&server, "skill_invocation").await;
-    assert_eq!(
-        event["event_params"]["plugin_id"],
-        SAMPLE_REMOTE_PLUGIN_CONFIG_NAME
-    );
-    assert_eq!(
-        event["event_params"]["remote_plugin_id"],
-        SAMPLE_REMOTE_PLUGIN_ID
-    );
-    assert_eq!(event["event_params"]["invoke_type"], "explicit");
 
     Ok(())
 }
@@ -2308,17 +2123,6 @@ async fn implicit_plugin_skill_invocation_tracks_remote_plugin_id(
         .await?;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    let event = wait_for_analytics_event(&server, "skill_invocation").await;
-    assert_eq!(
-        event["event_params"]["plugin_id"],
-        SAMPLE_REMOTE_PLUGIN_CONFIG_NAME
-    );
-    assert_eq!(
-        event["event_params"]["remote_plugin_id"],
-        SAMPLE_REMOTE_PLUGIN_ID
-    );
-    assert_eq!(event["event_params"]["invoke_type"], "implicit");
-
     Ok(())
 }
 
@@ -2328,30 +2132,4 @@ fn persist_sample_remote_plugin_id(home: &TempDir) {
     PluginStore::new(home.path().to_path_buf())
         .write_remote_plugin_id(&plugin_id, SAMPLE_REMOTE_PLUGIN_ID)
         .expect("persist remote plugin id");
-}
-
-async fn wait_for_analytics_event(server: &MockServer, event_type: &str) -> serde_json::Value {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let requests = server.received_requests().await.unwrap_or_default();
-        if let Some(event) = requests
-            .into_iter()
-            .filter(|request| request.url.path() == "/codex/analytics-events/events")
-            .find_map(|request| {
-                let payload: serde_json::Value = serde_json::from_slice(&request.body).ok()?;
-                payload["events"].as_array().and_then(|events| {
-                    events
-                        .iter()
-                        .find(|event| event["event_type"] == event_type)
-                        .cloned()
-                })
-            })
-        {
-            break event;
-        }
-        if Instant::now() >= deadline {
-            panic!("timed out waiting for {event_type} analytics request");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }

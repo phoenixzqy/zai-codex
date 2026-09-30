@@ -1,3 +1,10 @@
+# Branch policy
+
+- Reserve `main` exclusively for syncing `openai/codex` upstream `main`. Keep it free of fork-specific commits and repository instructions.
+- Develop and iterate fork customizations on `zai-codex`. Unless the user explicitly requests another target, base customization branches on `zai-codex` and target customization pull requests at `zai-codex`, not `main`.
+- Keep `upstream` pointing to `openai/codex` and `origin` pointing to `phoenixzqy/zai-codex`. Sync `main` without rewriting history, then integrate upstream changes into `zai-codex` separately and revalidate the customizations.
+- Perform repository changes in a claimed isolated worktree; preserve the shared checkout and other sessions' work.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:

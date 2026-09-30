@@ -249,16 +249,17 @@ impl Classification {
         let mut classification_finished_at = None;
         let result: Result<ClassificationOutcome, String> = async {
             let review_model = if config.guardian_policy_config.is_none() {
-                let review_model_id = review_model_override.as_deref().unwrap_or_else(|| {
+                let review_model_id = review_model_override.clone().unwrap_or_else(|| {
                     create_model_provider(
                         config.model_provider.clone(),
                         Some(manager.auth_manager()),
                     )
                     .approval_review_preferred_model()
+                    .to_owned()
                 });
                 let review_model = manager
                     .get_models_manager()
-                    .get_model_info(review_model_id, &config.to_models_manager_config())
+                    .get_model_info(&review_model_id, &config.to_models_manager_config())
                     .await;
                 if review_model.used_fallback_model_metadata && review_model_override.is_none() {
                     parent_model.clone()

@@ -15,7 +15,6 @@ use crate::state::ActiveTurn;
 use crate::test_support::models_manager_with_provider;
 use crate::tools::hook_names::HookToolName;
 use crate::turn_metadata::ExecutionMetadata;
-use codex_app_server_protocol as app_server_protocol;
 use codex_config::CONFIG_TOML_FILE;
 use codex_config::config_toml::ConfigToml;
 use codex_config::types::AppConfig;
@@ -2189,75 +2188,10 @@ fn accepted_elicitation_without_content_defaults_to_accept() {
 
 #[tokio::test]
 async fn dispatched_mcp_approval_with_closed_response_is_classified_as_approval() {
-    use wiremock::matchers::method;
-    use wiremock::matchers::path;
-
-    let server = wiremock::MockServer::start().await;
-    wiremock::Mock::given(method("POST"))
-        .and(path("/codex/analytics-events/events"))
-        .respond_with(wiremock::ResponseTemplate::new(200))
-        .mount(&server)
-        .await;
-
-    let (mut session, turn_context, rx_event) = make_session_and_context_with_rx().await;
-    let client = codex_analytics::AnalyticsEventsClient::new(
-        crate::test_support::auth_manager_from_auth(
-            codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
-        ),
-        server.uri(),
-        /*analytics_enabled*/ Some(true),
-    );
-    Arc::get_mut(&mut session)
-        .expect("session should be uniquely owned")
-        .services
-        .analytics_events_client = client.clone();
+    let (session, turn_context, rx_event) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
 
     let call_id = "modern-missing-response";
-    let thread_id = session.thread_id.to_string();
-    let turn_id = turn_context.sub_id.clone();
-    client.track_initialize(
-        /*connection_id*/ 1,
-        app_server_protocol::InitializeParams::default(),
-        "test-client".to_string(),
-        codex_analytics::AppServerRpcTransport::Stdio,
-    );
-    let response = serde_json::from_value(serde_json::json!({
-        "thread": {
-            "id": thread_id, "sessionId": thread_id, "preview": "", "ephemeral": false,
-            "modelProvider": "openai", "createdAt": 1, "updatedAt": 1,
-            "status": {"type": "idle"}, "cwd": &turn_context.config.cwd,
-            "cliVersion": "0.0.0", "source": "exec", "turns": [],
-        },
-        "model": "test-model", "modelProvider": "openai", "cwd": &turn_context.config.cwd,
-        "approvalPolicy": "on-request", "approvalsReviewer": "user",
-        "sandbox": {"type": "dangerFullAccess"},
-    }))
-    .expect("thread-start response should deserialize");
-    client.track_response(
-        /*connection_id*/ 1,
-        app_server_protocol::RequestId::Integer(1),
-        &app_server_protocol::ClientResponsePayload::ThreadStart(response),
-    );
-    client.track_notification(&app_server_protocol::ServerNotification::TurnStarted(
-        serde_json::from_value(serde_json::json!({
-            "threadId": thread_id,
-            "turn": {"id": turn_id, "items": [], "status": "inProgress"},
-        }))
-        .expect("turn-started notification should deserialize"),
-    ));
-    let mut item = serde_json::json!({
-        "type": "mcpToolCall", "id": call_id, "server": "calendar", "tool": "send",
-        "status": "inProgress", "arguments": {},
-        "appContext": {"connectorId": "calendar"},
-    });
-    client.track_notification(&app_server_protocol::ServerNotification::ItemStarted(
-        serde_json::from_value(serde_json::json!({
-            "threadId": thread_id, "turnId": turn_id, "startedAtMs": 1, "item": item,
-        }))
-        .expect("item-started notification should deserialize"),
-    ));
-
     let action = ApprovalAction::McpToolCall {
         id: call_id.to_string(),
         server: "calendar".to_string(),
@@ -2291,40 +2225,6 @@ async fn dispatched_mcp_approval_with_closed_response_is_classified_as_approval(
     assert_eq!(
         approval.await.expect("approval task should complete"),
         ReviewDecision::Abort
-    );
-
-    item["status"] = serde_json::json!("failed");
-    client.track_notification(&app_server_protocol::ServerNotification::ItemCompleted(
-        serde_json::from_value(serde_json::json!({
-            "threadId": thread_id, "turnId": turn_id, "completedAtMs": 2, "item": item,
-        }))
-        .expect("item-completed notification should deserialize"),
-    ));
-    client.flush().await;
-    let events = server
-        .received_requests()
-        .await
-        .expect("analytics requests should be recorded")
-        .into_iter()
-        .flat_map(|request| {
-            serde_json::from_slice::<serde_json::Value>(&request.body)
-                .expect("analytics request should deserialize")["events"]
-                .as_array()
-                .expect("analytics events should be an array")
-                .clone()
-        })
-        .collect::<Vec<_>>();
-    let mcp_events = events
-        .iter()
-        .filter(|event| {
-            event["event_type"] == "codex_mcp_tool_call_event"
-                && event["event_params"]["item_id"] == call_id
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(mcp_events.len(), 1);
-    assert_eq!(
-        mcp_events[0]["event_params"]["elicitation_type"],
-        "approval"
     );
 }
 

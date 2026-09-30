@@ -338,20 +338,7 @@ metrics_exporter = {{ otlp-http = {{ endpoint = "{collector_url}/v1/metrics", pr
         .filter(|request| request.url.path() == "/v1/metrics")
         .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body))
         .collect::<serde_json::Result<Vec<_>>>()?;
-    assert_metric_point(&metrics, "exec_server_processes_active", &[], Some(0));
-    assert_metric_point(
-        &metrics,
-        "exec_server_processes_finished_total",
-        &[("result", "terminated")],
-        Some(1),
-    );
-    assert_metric_point(
-        &metrics,
-        "exec_server_requests_total",
-        &[("method", "process/start"), ("result", "success")],
-        Some(1),
-    );
-
+    assert!(metrics.is_empty());
     Ok(())
 }
 
@@ -515,43 +502,7 @@ metrics_exporter = {{ otlp-http = {{ endpoint = "{base_url}/v1/metrics", protoco
         .filter(|request| request.url.path() == "/v1/metrics")
         .map(|request| serde_json::from_slice::<serde_json::Value>(&request.body))
         .collect::<serde_json::Result<Vec<_>>>()?;
-    assert_metric_point(
-        &metrics,
-        "exec_server_connections_active",
-        &[("transport", "stdio")],
-        Some(0),
-    );
-    assert_metric_point(
-        &metrics,
-        "exec_server_connections_total",
-        &[("transport", "stdio")],
-        Some(1),
-    );
-    assert_metric_point(
-        &metrics,
-        "exec_server_requests_total",
-        &[("method", "process/start"), ("result", "success")],
-        Some(1),
-    );
-    assert_metric_point(&metrics, "exec_server_processes_active", &[], Some(0));
-    assert_metric_point(
-        &metrics,
-        "exec_server_processes_finished_total",
-        &[("result", "terminated")],
-        Some(1),
-    );
-    assert_metric_point(
-        &metrics,
-        "exec_server_request_duration_seconds",
-        &[("method", "process/start"), ("result", "success")],
-        /*value*/ None,
-    );
-    assert_metric_point(
-        &metrics,
-        "exec_server_process_duration_seconds",
-        &[("result", "terminated")],
-        /*value*/ None,
-    );
+    assert!(metrics.is_empty());
     Ok(())
 }
 
@@ -632,46 +583,4 @@ async fn wait_for_response(
             return Ok(());
         }
     }
-}
-
-fn assert_metric_point(
-    payloads: &[serde_json::Value],
-    name: &str,
-    attributes: &[(&str, &str)],
-    value: Option<i64>,
-) {
-    let found = payloads
-        .iter()
-        .flat_map(|payload| payload["resourceMetrics"].as_array().into_iter().flatten())
-        .flat_map(|resource| resource["scopeMetrics"].as_array().into_iter().flatten())
-        .flat_map(|scope| scope["metrics"].as_array().into_iter().flatten())
-        .filter(|metric| metric["name"].as_str() == Some(name))
-        .flat_map(|metric| {
-            ["gauge", "sum", "histogram"]
-                .into_iter()
-                .find_map(|kind| metric[kind]["dataPoints"].as_array())
-                .into_iter()
-                .flatten()
-        })
-        .any(|point| {
-            let actual_attributes = point["attributes"]
-                .as_array()
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            let attributes_match = actual_attributes.len() == attributes.len()
-                && attributes.iter().all(|(expected_key, expected_value)| {
-                    actual_attributes.iter().any(|actual| {
-                        actual["key"].as_str() == Some(*expected_key)
-                            && actual["value"]["stringValue"].as_str() == Some(*expected_value)
-                    })
-                });
-            let actual_value = point["asInt"]
-                .as_i64()
-                .or_else(|| point["asInt"].as_str()?.parse().ok());
-            attributes_match && value.is_none_or(|expected| actual_value == Some(expected))
-        });
-    assert!(
-        found,
-        "metric {name} with attributes {attributes:?} and value {value:?} missing"
-    );
 }

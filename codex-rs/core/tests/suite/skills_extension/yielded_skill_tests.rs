@@ -1,4 +1,4 @@
-//! Skill analytics retain the originating turn when Code Mode resumes a yielded cell.
+//! Yielded skill reads complete across consecutive Code Mode turns.
 
 use super::*;
 use codex_core::TurnInputSubmission;
@@ -106,6 +106,10 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
             .expect("yielded cell status")
             .starts_with("Script running with cell ID ")
     );
+    assert_eq!(
+        yielded.single_request().body_json()["client_metadata"]["turn_id"],
+        turn_a
+    );
 
     mount_sse_once(
         &server,
@@ -120,7 +124,7 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
         ]),
     )
     .await;
-    mount_sse_once(
+    let completed = mount_sse_once(
         &server,
         sse(vec![
             ev_response_created("resp-b-done"),
@@ -142,15 +146,17 @@ async fn yielded_skill_read_keeps_originating_turn_metadata() -> Result<()> {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    assert_eq!(
+        completed.single_request().body_json()["client_metadata"]["turn_id"],
+        turn_b
+    );
+    let output = completed.single_request().custom_tool_call_output("call-b");
+    assert!(
+        output["output"]
+            .to_string()
+            .contains("Yielded skill instructions."),
+        "unexpected skill read output: {output}"
+    );
 
-    let events = wait_for_analytics_events(&server, "skill_invocation", /*expected_count*/ 2).await;
-    assert_eq!(events.len(), 2);
-    for turn_id in [&turn_a, &turn_b] {
-        let event = events
-            .iter()
-            .find(|event| event["event_params"]["turn_id"] == *turn_id)
-            .expect("each skill read should retain its originating turn");
-        assert_eq!(event["skill_name"], "demo:yielded");
-    }
     Ok(())
 }

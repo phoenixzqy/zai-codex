@@ -47,42 +47,6 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn unloaded_compressed_rollout_is_included_as_jsonl_attachment() {
-    let fixture = Fixture::new();
-    // The app-server supplies the DB's logical .jsonl path without loading this thread.
-    let paths = [fixture.attachment()];
-    let snapshot = CodexFeedback::new().snapshot(/*session_id*/ None);
-    let attachments = snapshot
-        .feedback_attachments(
-            /*include_logs*/ false,
-            &[],
-            &paths,
-            /*logs_override*/ None,
-        )
-        .collect::<Result<Vec<_>>>()
-        .unwrap();
-    assert_eq!(
-        attachments
-            .iter()
-            .map(|attachment| (
-                attachment.filename.as_str(),
-                attachment.content_type.as_deref(),
-                attachment.buffer.as_slice(),
-            ))
-            .collect::<Vec<_>>(),
-        vec![(
-            fixture.plain.file_name().unwrap().to_str().unwrap(),
-            Some("text/plain"),
-            JSONL
-        )]
-    );
-    assert!(
-        !fixture.plain.exists(),
-        "feedback must not materialize the durable rollout"
-    );
-}
-
-#[test]
 fn compressed_paths_keep_canonical_names_and_filename_overrides() {
     let mut fixture = Fixture::new();
     // Reverted rollouts carry a stable thread ID and a separate immutable rollout ID.

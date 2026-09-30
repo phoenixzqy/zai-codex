@@ -182,7 +182,7 @@ async fn model_guardian_policy_scores_code_mode_cells(
     state.allow_guardian_review.notify_one();
     let id = app_server
         .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id,
+            thread_id: thread.id.clone(),
             input: vec![UserInput::Text {
                 text: USER_CONTEXT.to_owned(),
                 text_elements: Vec::new(),
@@ -203,27 +203,7 @@ async fn model_guardian_policy_scores_code_mode_cells(
     }
     for completed_scores in 1..=scores_per_cell {
         state.allow_luna.notify_one();
-        timeout(TIMEOUT, async {
-            loop {
-                let events = captured_analytics_events(&analytics_server).await;
-                if events
-                    .iter()
-                    .filter(|event| {
-                        event["event_type"] == "codex_guardian_v2_classification"
-                            && matches!(
-                                event["event_params"]["outcome"].as_str(),
-                                Some("success" | "superseded")
-                            )
-                    })
-                    .count()
-                    >= completed_scores
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(/*millis*/ 25)).await;
-            }
-        })
-        .await?;
+        wait_for_classification_logs(codex_home.path(), &thread.id, completed_scores).await?;
     }
     continue_parent.notify_one();
     let completed: TurnCompletedNotification =

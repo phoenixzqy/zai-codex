@@ -7267,9 +7267,7 @@ fn request_user_input_request(thread_id: ThreadId, turn_id: &str, item_id: &str)
 }
 
 #[tokio::test]
-async fn feedback_submission_stages_logs_cleans_up_and_emits_error_history_cell() -> Result<()> {
-    use base64::Engine;
-    use base64::engine::general_purpose::STANDARD;
+async fn feedback_submission_rejects_before_staging_and_emits_error_history_cell() -> Result<()> {
     use std::io::Write;
     use tracing_subscriber::fmt::writer::MakeWriter;
 
@@ -7277,7 +7275,6 @@ async fn feedback_submission_stages_logs_cleans_up_and_emits_error_history_cell(
     let (server, requests, proxy) =
         session_lifecycle_requests::start_recording_remote_app_server(&app.config).await?;
     let diagnostic = "SQLITE LOG WRITE FAILURE: disk full\n";
-    let expected_logs = format!("{}{diagnostic}", "x".repeat(1024 * 1024 - diagnostic.len()));
     let mut writer = app.feedback.make_writer().make_writer();
     writer.write_all(&vec![b'x'; 1024 * 1024])?;
     writer.write_all(diagnostic.as_bytes())?;
@@ -7295,7 +7292,6 @@ async fn feedback_submission_stages_logs_cleans_up_and_emits_error_history_cell(
             /*turn_id*/ None,
             include_logs,
         );
-        // Reject before network upload, after the client has staged its diagnostics.
         params.thread_id = Some("invalid-thread-id".into());
         let error = feedback_upload::fetch_feedback_upload(
             server.request_handle(),
@@ -7307,46 +7303,13 @@ async fn feedback_submission_stages_logs_cleans_up_and_emits_error_history_cell(
         )
         .await
         .unwrap_err();
-        assert!(format!("{error:#}").contains("invalid thread id"));
+        assert!(format!("{error:#}").contains("Remote error reporting is disabled"));
         let recorded = std::mem::take(&mut *requests.lock().unwrap());
-        let upload = recorded
-            .iter()
-            .find(|r| r.method == "feedback/upload")
-            .unwrap();
-        let upload: FeedbackUploadParams = serde_json::from_value(upload.params.clone().unwrap())?;
-        if include_logs && !staging_fails {
-            let write = recorded
-                .iter()
-                .find(|r| r.method == "fs/writeFile")
-                .unwrap();
-            let write = write.params.as_ref().unwrap();
-            assert_eq!(
-                STANDARD.decode(write["dataBase64"].as_str().unwrap())?,
-                expected_logs.as_bytes()
-            );
-            assert_eq!(
-                upload.extra_log_files,
-                Some(vec![
-                    PathBuf::from("existing-rollout.jsonl"),
-                    PathBuf::from(write["path"].as_str().unwrap())
-                ])
-            );
-            assert_eq!(std::fs::read_dir(&tmp)?.count(), 0);
-        } else if staging_fails {
-            assert_eq!(
-                upload.extra_log_files,
-                Some(vec![PathBuf::from("existing-rollout.jsonl")])
-            );
-            assert!(
-                upload
-                    .reason
-                    .unwrap()
-                    .contains("TUI client logs were omitted")
-            );
+        assert!(recorded.is_empty());
+        if staging_fails {
+            assert_eq!(std::fs::read_to_string(&tmp)?, "not a directory");
         } else {
-            assert_eq!(recorded.len(), 1);
-            assert_eq!(upload.extra_log_files, None);
-            assert!(!tmp.exists());
+            assert!(!tmp.try_exists()?);
         }
     }
     server.shutdown().await?;

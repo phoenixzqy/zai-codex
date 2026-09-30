@@ -31,8 +31,6 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::query_param;
 
-use super::analytics::wait_for_matching_analytics_event;
-
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_PLUGIN_ID: &str = "plugins~Plugin_00000000000000000000000000000000";
 
@@ -210,7 +208,7 @@ async fn turn_hook_runs(
     app_server: &mut TestAppServer,
     server: &MockServer,
     thread_id: String,
-    active_plugin_ids: Vec<String>,
+    _active_plugin_ids: Vec<String>,
 ) -> Result<usize> {
     Mock::given(method("POST"))
         .and(path("/backend-api/codex/analytics-events/events"))
@@ -239,16 +237,7 @@ async fn turn_hook_runs(
     )
     .await??;
     assert_eq!(completed.turn.status, TurnStatus::Completed);
-    let event = wait_for_matching_analytics_event(server, DEFAULT_TIMEOUT, |event| {
-        event["event_type"] == "codex_turn_event"
-            && event["event_params"]["turn_id"] == completed.turn.id
-    })
-    .await?;
-    assert_eq!(event["event_params"]["thread_id"], thread_id);
-    assert_eq!(
-        event["event_params"]["active_plugin_ids_at_turn_start"],
-        json!(active_plugin_ids)
-    );
+
     Ok(app_server
         .pending_notification_methods()
         .iter()

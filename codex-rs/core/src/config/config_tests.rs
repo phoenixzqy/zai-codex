@@ -40,6 +40,7 @@ use codex_config::permissions_toml::NetworkToml;
 use codex_config::permissions_toml::PermissionProfileToml;
 use codex_config::permissions_toml::PermissionsToml;
 use codex_config::permissions_toml::WorkspaceRootsToml;
+use codex_config::types::AnalyticsConfigToml;
 use codex_config::types::AppToolApproval;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::BundledSkillsConfig;
@@ -6393,21 +6394,29 @@ fn local_dev_builds_force_file_mcp_oauth_store_modes() {
 }
 
 #[tokio::test]
-async fn feedback_enabled_defaults_to_true() -> std::io::Result<()> {
+async fn reporting_configuration_cannot_enable_delivery() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
-    let cfg = ConfigToml {
-        feedback: Some(FeedbackConfigToml::default()),
-        ..Default::default()
-    };
-
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        codex_home.abs(),
-    )
-    .await?;
-
-    assert_eq!(config.feedback_enabled, true);
+    for enabled in [false, true] {
+        let cfg = ConfigToml {
+            feedback: Some(FeedbackConfigToml {
+                enabled: Some(enabled),
+            }),
+            analytics: Some(AnalyticsConfigToml {
+                enabled: Some(enabled),
+            }),
+            ..Default::default()
+        };
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await?;
+        assert_eq!(
+            (config.feedback_enabled, config.analytics_enabled),
+            (false, Some(false))
+        );
+    }
 
     Ok(())
 }
@@ -9914,7 +9923,7 @@ async fn legacy_profile_selection_is_rejected() -> std::io::Result<()> {
 }
 
 #[tokio::test]
-async fn metrics_exporter_defaults_to_statsig_when_missing() -> std::io::Result<()> {
+async fn metrics_exporter_defaults_to_none_when_missing() -> std::io::Result<()> {
     let fixture = create_test_fixture()?;
 
     let config = Config::load_from_base_config_with_overrides(
@@ -9927,7 +9936,7 @@ async fn metrics_exporter_defaults_to_statsig_when_missing() -> std::io::Result<
     )
     .await?;
 
-    assert_eq!(config.otel.metrics_exporter, OtelExporterKind::Statsig);
+    assert_eq!(config.otel.metrics_exporter, OtelExporterKind::None);
     assert!(!config.otel.agent_response_logging_enabled());
     assert!(!config.otel.guardian_assessment_logging_enabled());
     Ok(())

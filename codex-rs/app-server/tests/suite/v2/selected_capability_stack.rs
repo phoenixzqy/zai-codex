@@ -44,7 +44,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use super::analytics::mount_analytics_capture;
-use super::analytics::wait_for_matching_analytics_event;
+
 use super::app_list::connector_tool;
 use super::app_list::start_apps_server_with_delays;
 
@@ -154,7 +154,7 @@ async fn selected_plugin_mcp_startup_respects_explicit_mentions(
         app_server.read_stream_until_response_message(RequestId::Integer(request_id)),
     )
     .await??;
-    let TurnStartResponse { turn } = to_response(response)?;
+    let TurnStartResponse { turn: _ } = to_response(response)?;
     wait_for_pid_file(&fixture.pid_file).await?;
     if explicitly_mentioned {
         // An explicit mention must outwait the optional one-second grace.
@@ -179,17 +179,6 @@ async fn selected_plugin_mcp_startup_respects_explicit_mentions(
             .tool_by_name(&format!("mcp__{MCP_SERVER_NAME}"), "echo")
             .is_some(),
         explicitly_mentioned,
-    );
-
-    let event = wait_for_matching_analytics_event(&responses_server, READ_TIMEOUT, |event| {
-        event["event_type"] == "codex_turn_event"
-            && event["event_params"]["thread_id"] == thread_id
-            && event["event_params"]["turn_id"] == turn.id
-    })
-    .await?;
-    assert_eq!(
-        event["event_params"]["active_plugin_ids_at_turn_start"],
-        json!([PLUGIN_ID])
     );
 
     exec_server.kill().await?;
