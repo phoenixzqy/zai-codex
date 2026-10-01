@@ -268,6 +268,7 @@ mod tests {
         let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
         thread_store.insert(WebSearchExtensionConfig {
             available: true,
+            http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
             provider: ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             settings: Default::default(),
         });
