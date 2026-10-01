@@ -5,10 +5,6 @@ The default and release branch is **`zai-codex`**, not `main`. `main` mirrors
 `zai-codex` and carry the `zai` label. Hosted Actions are disabled; releases are
 built and validated locally, then uploaded with `gh`.
 
-The README is the public introduction. Keep its two feature claims accurate:
-GitHub Copilot subscription support and disabled telemetry / remote diagnostic
-uploads. Local diagnostic logs still exist.
-
 ## Prepare native assets
 
 After the release changes merge, claim an isolated worktree based on the freshly
