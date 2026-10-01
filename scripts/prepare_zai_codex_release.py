@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from codex_package.archive import write_archive
 from codex_package.cli import parse_package_version
 from codex_package.targets import TARGET_SPECS
+from codex_package.version import read_workspace_version
 from install_zai_codex import host_target, TAG_PATTERN
 
 
@@ -41,6 +42,17 @@ def package_release(package, output, target, version, commit, notices):
     checksum = asset.with_name(asset.name + ".sha256")
     if asset.exists() or checksum.exists():
         raise ValueError("Release output already exists; use a new output directory")
+    binary = package / (
+        "bin/codex.exe" if target.endswith("windows-msvc") else "bin/codex"
+    )
+    actual = subprocess.check_output([str(binary), "--version"], text=True).strip()
+    if not actual.startswith("codex-cli "):
+        raise ValueError(f"Unexpected Codex version: {actual}")
+    executable_version = parse_package_version(actual.removeprefix("codex-cli "))
+    metadata_path = package / "codex-package.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["version"] = executable_version
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
     for name in ("LICENSE", "NOTICE"):
         shutil.copy2(ROOT / name, package / name)
     shutil.copytree(notices, package / "third-party-notices")
@@ -57,6 +69,7 @@ def package_release(package, output, target, version, commit, notices):
                 "branch": "zai-codex",
                 "commit": commit,
                 "tag": f"zai-codex-v{version}",
+                "version": version,
             },
             indent=2,
         )
@@ -105,7 +118,7 @@ def main():
                 "--cargo-profile",
                 "release",
                 "--package-version",
-                args.version,
+                read_workspace_version(),
                 "--package-dir",
                 str(package),
             ],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download a verified custom release without replacing upstream Codex."""
+"""Download a verified custom release and install the codex command."""
 
 import argparse
 import hashlib
@@ -123,7 +123,6 @@ def validate_package(package, target, tag):
             "target": target,
             "variant": "codex",
             "entrypoint": f"bin/codex{suffix}",
-            "version": tag.removeprefix("zai-codex-v"),
         }.items()
     ):
         raise ValueError("Release package metadata mismatch")
@@ -131,6 +130,7 @@ def validate_package(package, target, tag):
         provenance.get("repository") != REPOSITORY
         or provenance.get("branch") != "zai-codex"
         or provenance.get("tag") != tag
+        or provenance.get("version") != tag.removeprefix("zai-codex-v")
         or not re.fullmatch(r"[0-9a-f]{40}", provenance.get("commit", ""))
     ):
         raise ValueError("Custom release provenance mismatch")
@@ -156,7 +156,11 @@ def validate_package(package, target, tag):
     if not (package / "third-party-notices").is_dir():
         raise ValueError("Missing third-party notices")
     binary = package / f"bin/codex{suffix}"
-    subprocess.run([str(binary), "--version"], check=True)
+    result = subprocess.run(
+        [str(binary), "--version"], check=True, capture_output=True, text=True
+    )
+    if result.stdout.strip() != f"codex-cli {metadata.get('version')}":
+        raise ValueError("Package version does not match its executable")
     subprocess.run(
         [str(binary), "login", "github-copilot", "--help"],
         check=True,
@@ -216,7 +220,7 @@ def install(archive, checksum, tag, target, root, launcher):
             shutil.rmtree(destination)
             raise
     print(f"Installed {tag}: {launcher}")
-    print(f"Add {launcher.parent} to PATH if needed, then run zai-codex.")
+    print(f"Add {launcher.parent} to PATH if needed, then run codex.")
 
 
 def main():
@@ -288,11 +292,7 @@ def main():
                 "ZAI_CODEX_BIN_LINK",
                 str(
                     Path(install_dir or "~/.local/bin")
-                    / (
-                        "zai-codex.cmd"
-                        if target.endswith("windows-msvc")
-                        else "zai-codex"
-                    )
+                    / ("codex.cmd" if target.endswith("windows-msvc") else "codex")
                 ),
             )
         )

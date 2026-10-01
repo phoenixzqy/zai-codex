@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import zipfile
 
@@ -19,6 +20,11 @@ class CustomReleaseTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="zai-release-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        version = patch.object(
+            installer.subprocess, "check_output", return_value="codex-cli 0.0.0\n"
+        )
+        version.start()
+        self.addCleanup(version.stop)
         self.windows = os.name == "nt"
         self.target = (
             "x86_64-pc-windows-msvc" if self.windows else "x86_64-unknown-linux-gnu"
@@ -32,9 +38,7 @@ class CustomReleaseTest(unittest.TestCase):
         self.output = self.root / "output"
         self.output.mkdir()
         self.installs = self.root / "installed"
-        self.launcher = self.root / (
-            "bin/zai-codex.cmd" if self.windows else "bin/zai-codex"
-        )
+        self.launcher = self.root / ("bin/codex.cmd" if self.windows else "bin/codex")
 
     def make_asset(self, target=None):
         target = target or self.target
@@ -84,10 +88,14 @@ class CustomReleaseTest(unittest.TestCase):
 
     def test_install_and_upgrade_preserve_upstream_and_previous_package(self):
         asset = self.make_asset()
-        upstream = self.launcher.with_name("codex")
+        upstream = self.launcher.with_name("codex-upstream")
         upstream.parent.mkdir()
         upstream.write_text("upstream executable")
-        with patch.object(installer.subprocess, "run"):
+        with patch.object(
+            installer.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout="codex-cli 0.0.0\n"),
+        ):
             self.install_asset(asset)
             previous = next(self.installs.iterdir())
             self.install_asset(asset)
@@ -97,11 +105,31 @@ class CustomReleaseTest(unittest.TestCase):
         self.assertTrue((previous / "NOTICE").is_file())
         self.assertFalse(list(self.installs.glob(".zai-stage-*")))
 
+    def test_release_version_is_separate_from_executable_version(self):
+        asset = self.make_asset()
+        with zipfile.ZipFile(asset) as archive:
+            metadata = json.loads(archive.read("codex-package.json"))
+            provenance = json.loads(archive.read("zai-release.json"))
+        self.assertEqual(metadata["version"], "0.0.0")
+        self.assertEqual(provenance["version"], "0.1.0")
+        with patch.object(
+            installer.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout="codex-cli 9.9.9\n"),
+        ):
+            with self.assertRaisesRegex(ValueError, "version does not match"):
+                self.install_asset(asset)
+        self.assertFalse(self.launcher.exists())
+
     def test_windows_uses_launcher_without_symlink_privileges(self):
         target = "aarch64-pc-windows-msvc"
         asset = self.make_asset(target)
         launcher = self.launcher.with_suffix(".cmd")
-        with patch.object(installer.subprocess, "run"):
+        with patch.object(
+            installer.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout="codex-cli 0.0.0\n"),
+        ):
             self.install_asset(asset, target, launcher)
             self.install_asset(asset, target, launcher)
         self.assertFalse(launcher.is_symlink())
@@ -110,7 +138,11 @@ class CustomReleaseTest(unittest.TestCase):
 
     def test_bad_checksum_never_executes_or_activates(self):
         asset = self.make_asset()
-        with patch.object(installer.subprocess, "run") as execute:
+        with patch.object(
+            installer.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout="codex-cli 0.0.0\n"),
+        ) as execute:
             with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                 installer.install(
                     asset, "0" * 64, self.tag, self.target, self.installs, self.launcher
@@ -136,7 +168,11 @@ class CustomReleaseTest(unittest.TestCase):
 
     def test_activation_failure_removes_only_new_package(self):
         asset = self.make_asset()
-        with patch.object(installer.subprocess, "run"):
+        with patch.object(
+            installer.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout="codex-cli 0.0.0\n"),
+        ):
             self.install_asset(asset)
             previous = next(self.installs.iterdir())
             launcher_state = installer.launcher_state(
@@ -234,7 +270,11 @@ class CustomReleaseTest(unittest.TestCase):
                 return_value="Windows" if self.windows else "Linux",
             ),
             patch.object(sys, "argv", ["installer"]),
-            patch.object(installer.subprocess, "run"),
+            patch.object(
+                installer.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="codex-cli 0.0.0\n"),
+            ),
             patch.dict(
                 os.environ,
                 {
