@@ -11,15 +11,17 @@ import re
 import shutil
 import stat
 import subprocess
-import tarfile
+import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
 
 REPOSITORY = "phoenixzqy/zai-codex"
-TAG_PATTERN = re.compile(r"zai-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
+SITE = "https://phoenixzqy.github.io"
+TAG_PATTERN = re.compile(r"zai-codex-v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?")
 WINDOWS_MARKER = "@rem zai-codex release launcher\n"
 
 
@@ -38,8 +40,34 @@ def host_target():
 
 
 def download(url, destination):
+    def check_url(value):
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme == "https" and not parsed.username and not parsed.password:
+            return
+        if (
+            os.environ.get("ZAI_RELEASE_MANIFEST_URL")
+            and parsed.scheme == "http"
+            and parsed.hostname == "127.0.0.1"
+        ):
+            return
+        raise ValueError("Downloads require HTTPS")
+
+    class RedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, request, response, code, message, headers, newurl):
+            check_url(newurl)
+            if urllib.parse.urlsplit(newurl).scheme != "https":
+                raise ValueError("HTTPS redirects must stay on HTTPS")
+            if urllib.parse.urlsplit(request.full_url).scheme != "https":
+                raise ValueError("Local test downloads must not redirect")
+            return super().redirect_request(
+                request, response, code, message, headers, newurl
+            )
+
+    check_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": "zai-codex-installer"})
-    with urllib.request.urlopen(request, timeout=120) as response:
+    with urllib.request.build_opener(RedirectHandler()).open(
+        request, timeout=120
+    ) as response:
         with destination.open("wb") as output:
             shutil.copyfileobj(response, output)
 
@@ -71,27 +99,16 @@ def verified_extract(archive_path, checksum, destination):
             shutil.copyfileobj(source, output)
         path.chmod(0o755 if mode & 0o111 else 0o644)
 
-    if archive_path.suffix == ".zip":
-        with zipfile.ZipFile(archive_path) as archive:
-            for member in archive.infolist():
-                mode = member.external_attr >> 16
-                if stat.S_ISLNK(mode):
-                    raise ValueError("Archive links are not allowed")
-                if member.is_dir():
-                    output_path(member.filename).mkdir(parents=True, exist_ok=True)
-                else:
-                    with archive.open(member) as source:
-                        copy_member(member.filename, mode, source)
-    else:
-        with tarfile.open(archive_path, "r:gz") as archive:
-            for member in archive:
-                if member.isdir():
-                    output_path(member.name).mkdir(parents=True, exist_ok=True)
-                elif member.isfile():
-                    with archive.extractfile(member) as source:
-                        copy_member(member.name, member.mode, source)
-                else:
-                    raise ValueError("Archive links and special files are not allowed")
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            mode = member.external_attr >> 16
+            if stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError("Archive links and special files are not allowed")
+            if member.is_dir():
+                output_path(member.filename).mkdir(parents=True, exist_ok=True)
+            else:
+                with archive.open(member) as source:
+                    copy_member(member.filename, mode, source)
 
 
 def validate_package(package, target, tag):
@@ -106,7 +123,7 @@ def validate_package(package, target, tag):
             "target": target,
             "variant": "codex",
             "entrypoint": f"bin/codex{suffix}",
-            "version": tag.removeprefix("zai-v"),
+            "version": tag.removeprefix("zai-codex-v"),
         }.items()
     ):
         raise ValueError("Release package metadata mismatch")
@@ -204,37 +221,82 @@ def install(archive, checksum, tag, target, root, launcher):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--release", default="latest", help="latest or zai-vX.Y.Z")
-    args = parser.parse_args()
-    tag = args.release
+    parser.parse_args()
+    if sys.version_info < (3, 10):
+        raise ValueError("Python 3.10+ is required")
+    manifest_url = os.environ.get(
+        "ZAI_RELEASE_MANIFEST_URL", f"{SITE}/releases/zai-codex/latest/manifest.json"
+    )
     with tempfile.TemporaryDirectory(prefix="zai-codex-download-") as temporary:
         temporary = Path(temporary)
-        if tag == "latest":
-            metadata = temporary / "release.json"
-            download(
-                f"https://api.github.com/repos/{REPOSITORY}/releases/latest", metadata
-            )
-            tag = json.loads(metadata.read_text())["tag_name"]
+        metadata = temporary / "manifest.json"
+        download(manifest_url, metadata)
+        manifest = json.loads(metadata.read_text())
+        if manifest.get("schemaVersion") != 1 or manifest.get("appId") != "zai-codex":
+            raise ValueError("Custom release manifest mismatch")
+        release = manifest["release"]
+        if release is None:
+            raise ValueError("No public release of zai-codex has been published yet")
+        tag = f"zai-codex-v{release['version']}"
         if not TAG_PATTERN.fullmatch(tag):
             raise ValueError(f"Not a custom zai-codex release: {tag}")
         target = host_target()
-        extension = "zip" if target.endswith("windows-msvc") else "tar.gz"
-        name = f"zai-codex-{target}.{extension}"
-        base = f"https://github.com/{REPOSITORY}/releases/download/{tag}"
+        platform_id = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}[
+            platform.system()
+        ]
+        architecture = "arm64" if target.startswith("aarch64") else "x64"
+        matches = [
+            asset
+            for asset in release["assets"]
+            if asset.get("platform") == platform_id
+            and asset.get("architecture") == architecture
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"No unique published package for {platform_id}/{architecture}"
+            )
+        asset = matches[0]
+        name = f"zai-codex-{release['version']}-{target}.zip"
+        if asset["file"] != name:
+            raise ValueError("Custom package filename mismatch")
+        url = asset.get("url", urllib.parse.urljoin(manifest_url, name))
+        allowed = f"https://github.com/phoenixzqy/phoenixzqy.github.io/releases/download/{tag}/{name}"
+        local = urllib.parse.urljoin(manifest_url, name)
+        if url != allowed and url != local:
+            raise ValueError(
+                "Package URL must use the website release or manifest folder"
+            )
         archive = temporary / name
-        checksum = temporary / f"{name}.sha256"
-        download(f"{base}/{name}.sha256", checksum)
-        download(f"{base}/{name}", archive)
-        root = Path(os.environ.get("ZAI_CODEX_INSTALL_ROOT", "~/.local/lib/zai-codex"))
+        download(url, archive)
+        if (
+            type(asset["bytes"]) is not int
+            or asset["bytes"] <= 0
+            or archive.stat().st_size != asset["bytes"]
+        ):
+            raise ValueError("Release byte count mismatch")
+        install_dir = os.environ.get("ZAI_INSTALL_DIR")
+        root = Path(
+            os.environ.get(
+                "ZAI_CODEX_INSTALL_ROOT",
+                str(Path(install_dir) / "releases/zai-codex")
+                if install_dir
+                else "~/.local/lib/zai-codex",
+            )
+        )
         launcher = Path(
             os.environ.get(
                 "ZAI_CODEX_BIN_LINK",
-                "~/.local/bin/zai-codex.cmd"
-                if extension == "zip"
-                else "~/.local/bin/zai-codex",
+                str(
+                    Path(install_dir or "~/.local/bin")
+                    / (
+                        "zai-codex.cmd"
+                        if target.endswith("windows-msvc")
+                        else "zai-codex"
+                    )
+                ),
             )
         )
-        install(archive, checksum.read_text(), tag, target, root, launcher)
+        install(archive, asset["sha256"], tag, target, root, launcher)
     return 0
 
 
@@ -245,5 +307,13 @@ if __name__ == "__main__":
         raise SystemExit(
             f"Custom release download failed ({error.code}); no upstream fallback."
         )
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        zipfile.BadZipFile,
+        subprocess.SubprocessError,
+    ) as error:
         raise SystemExit(str(error))

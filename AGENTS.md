@@ -38,8 +38,8 @@
 - Follow `RELEASING.md` for publishing and updating customized builds.
 - Release from a clean, validated commit on `origin/zai-codex`, never `main`.
   `main` is the upstream mirror, not the release or customization branch.
-- Use `zai-v<version>` tags and assets from `phoenixzqy/zai-codex`. Installer
-  URLs must explicitly use `zai-codex`; never download an upstream build as a
+- Use `zai-codex-v<version>` website tags and assets on `phoenixzqy/phoenixzqy.github.io`.
+  Reuse the native packager and verified installer; never download an upstream build as a
   substitute for a missing custom release.
 - Keep the short README intro and native Linux, macOS, and Windows install
   commands current. Describe remote diagnostics as disabled, while local logs

@@ -1,29 +1,20 @@
 # zai-codex
 
-A custom build of [OpenAI Codex](https://github.com/openai/codex) with GitHub
-Copilot subscription support. Telemetry and remote diagnostic uploads are
-disabled; local diagnostic logs remain available.
+A custom [OpenAI Codex](https://github.com/openai/codex) build with GitHub Copilot subscription support. Telemetry and remote diagnostic uploads are disabled; local logs remain available.
 
-Download and install the latest customized build (Python 3.10+ required):
+Download and install (Python 3.10+ required):
 
-Linux / macOS:
 ```shell
-curl -fsSL https://raw.githubusercontent.com/phoenixzqy/zai-codex/zai-codex/scripts/install_zai_codex.py | python3 -
+curl -fsSL https://phoenixzqy.github.io/install/zai-codex.sh | sh
 ```
 
 Windows (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/phoenixzqy/zai-codex/zai-codex/scripts/install_zai_codex.py | python -
+irm https://phoenixzqy.github.io/install/zai-codex.ps1 | iex
 ```
 
-Run `zai-codex` from `~/.local/bin` (add that directory to PATH if needed).
-Sign in with your own GitHub account and an eligible Copilot subscription.
-The installer checks SHA-256 and keeps the original `codex` command intact.
-These commands download and execute this repository's installer; review it first.
+Add `~/.local/bin` to PATH if needed and run `zai-codex` (`zai-codex.cmd` on Windows). Sign in with your own eligible GitHub Copilot account. The installer checks SHA-256 and preserves `codex`; review the script before running it.
 
-The download becomes available when the first [custom release](https://github.com/phoenixzqy/zai-codex/releases)
-is published. See [release instructions](RELEASING.md) or the
-[build documentation](README.backup.md) to build from source.
+Downloads become available after the first [custom release](https://phoenixzqy.github.io/apps/releases/?id=zai-codex). See [release instructions](RELEASING.md) or [build documentation](README.backup.md).
 
-Licensed under [Apache 2.0](LICENSE). This is an independent fork, not an official
-OpenAI release.
+Licensed under [Apache 2.0](LICENSE). An independent fork, not an official OpenAI release.

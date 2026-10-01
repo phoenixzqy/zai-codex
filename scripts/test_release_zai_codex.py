@@ -1,12 +1,10 @@
 """Exercise release installation boundaries without network access or real installs."""
 
 import hashlib
-import io
 import json
 import os
 import sys
 from pathlib import Path
-import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,7 +23,7 @@ class CustomReleaseTest(unittest.TestCase):
         self.target = (
             "x86_64-pc-windows-msvc" if self.windows else "x86_64-unknown-linux-gnu"
         )
-        self.tag = "zai-v0.1.0"
+        self.tag = "zai-codex-v0.1.0"
         self.package = self.root / "package"
         self.package.mkdir()
         self.notices = self.root / "notices"
@@ -168,21 +166,6 @@ class CustomReleaseTest(unittest.TestCase):
                     self.install_asset(asset, target)
             self.assertEqual(list(self.installs.iterdir()), [])
 
-    def test_tar_traversal_and_symlinks_are_rejected(self):
-        for name, kind in (("../escape", tarfile.REGTYPE), ("link", tarfile.SYMTYPE)):
-            with self.subTest(name=name):
-                archive = self.root / "unsafe.tar.gz"
-                with tarfile.open(archive, "w:gz") as tar:
-                    member = tarfile.TarInfo(name)
-                    member.type = kind
-                    member.linkname = "../escape"
-                    member.size = 1 if kind == tarfile.REGTYPE else 0
-                    tar.addfile(member, io.BytesIO(b"x"))
-                checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
-                with self.assertRaises(ValueError):
-                    installer.verified_extract(archive, checksum, self.root / "extract")
-                self.assertFalse((self.root / "escape").exists())
-
     def test_zip_traversal_and_symlinks_are_rejected(self):
         for name, mode in (("../escape", 0o100644), ("link", 0o120777)):
             archive = self.root / "unsafe.zip"
@@ -197,36 +180,60 @@ class CustomReleaseTest(unittest.TestCase):
                     self.root / "extract",
                 )
 
-    def test_upstream_release_is_never_used_as_fallback(self):
-        def download(url, destination):
-            destination.write_text(json.dumps({"tag_name": "rust-v1.2.3"}))
+    def test_unpublished_and_foreign_manifests_do_not_download_binaries(self):
+        for manifest in (
+            {"schemaVersion": 1, "appId": "zai-codex", "release": None},
+            {"schemaVersion": 1, "appId": "codex", "release": None},
+        ):
+            with patch.object(
+                installer,
+                "download",
+                side_effect=lambda url, path: path.write_text(json.dumps(manifest)),
+            ) as fetch:
+                with patch.object(sys, "argv", ["installer"]):
+                    with self.assertRaises(ValueError):
+                        installer.main()
+            self.assertEqual(fetch.call_count, 1)
 
-        with patch.object(installer, "download", side_effect=download) as fetch:
-            with patch.object(sys, "argv", ["install_zai_codex.py"]):
-                with self.assertRaisesRegex(ValueError, "Not a custom"):
-                    installer.main()
-        self.assertEqual(fetch.call_count, 1)
-
-    def test_download_pins_one_custom_release_and_installs_verified_asset(self):
+    def test_download_uses_one_manifest_and_installs_verified_asset(self):
         asset = self.make_asset()
-        checksum = asset.with_name(asset.name + ".sha256")
+        manifest = {
+            "schemaVersion": 1,
+            "appId": "zai-codex",
+            "release": {
+                "version": "0.1.0",
+                "assets": [
+                    {
+                        "platform": "windows" if self.windows else "linux",
+                        "architecture": "x64",
+                        "file": asset.name,
+                        "bytes": asset.stat().st_size,
+                        "sha256": asset.with_name(asset.name + ".sha256")
+                        .read_text()
+                        .strip(),
+                    }
+                ],
+            },
+        }
         urls = []
 
-        def download(url, destination):
+        def download(url, path):
             urls.append(url)
-            if url.endswith("/releases/latest"):
-                destination.write_text(json.dumps({"tag_name": self.tag}))
-            else:
-                destination.write_bytes(
-                    checksum.read_bytes()
-                    if url.endswith(".sha256")
-                    else asset.read_bytes()
-                )
+            path.write_bytes(
+                json.dumps(manifest).encode()
+                if url.endswith("manifest.json")
+                else asset.read_bytes()
+            )
 
         with (
             patch.object(installer, "download", side_effect=download),
             patch.object(installer, "host_target", return_value=self.target),
-            patch.object(sys, "argv", ["install_zai_codex.py"]),
+            patch.object(
+                installer.platform,
+                "system",
+                return_value="Windows" if self.windows else "Linux",
+            ),
+            patch.object(sys, "argv", ["installer"]),
             patch.object(installer.subprocess, "run"),
             patch.dict(
                 os.environ,
@@ -238,10 +245,8 @@ class CustomReleaseTest(unittest.TestCase):
         ):
             self.assertEqual(installer.main(), 0)
         self.assertTrue(self.launcher.resolve().is_file())
-        self.assertEqual(len(urls), 3)
-        self.assertTrue(
-            all(f"/releases/download/{self.tag}/" in url for url in urls[1:])
-        )
+        self.assertEqual(len(urls), 2)
+        self.assertTrue(urls[1].endswith(asset.name))
 
     def test_packaging_requires_notices_and_refuses_overwrite(self):
         self.make_asset()

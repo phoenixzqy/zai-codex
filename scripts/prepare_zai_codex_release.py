@@ -37,8 +37,7 @@ def release_commit():
 def package_release(package, output, target, version, commit, notices):
     if not notices.is_dir() or not any(path.is_file() for path in notices.rglob("*")):
         raise ValueError("A nonempty reviewed third-party notice directory is required")
-    extension = "zip" if TARGET_SPECS[target].is_windows else "tar.gz"
-    asset = output / f"zai-codex-{target}.{extension}"
+    asset = output / f"zai-codex-{version}-{target}.zip"
     checksum = asset.with_name(asset.name + ".sha256")
     if asset.exists() or checksum.exists():
         raise ValueError("Release output already exists; use a new output directory")
@@ -57,7 +56,7 @@ def package_release(package, output, target, version, commit, notices):
                 "repository": "phoenixzqy/zai-codex",
                 "branch": "zai-codex",
                 "commit": commit,
-                "tag": f"zai-v{version}",
+                "tag": f"zai-codex-v{version}",
             },
             indent=2,
         )
@@ -84,7 +83,7 @@ def main():
     parser.add_argument("--third-party-notices", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    if not TAG_PATTERN.fullmatch(f"zai-v{args.version}"):
+    if not TAG_PATTERN.fullmatch(f"zai-codex-v{args.version}"):
         raise ValueError("Release version must not contain build metadata")
     if args.target != host_target():
         raise ValueError("Build and smoke-test each release on its native target host")
@@ -121,7 +120,7 @@ def main():
             package, output, args.target, args.version, commit, notices
         )
         try:
-            validate_package(package, args.target, f"zai-v{args.version}")
+            validate_package(package, args.target, f"zai-codex-v{args.version}")
         except BaseException:
             asset.unlink()
             asset.with_name(asset.name + ".sha256").unlink()
