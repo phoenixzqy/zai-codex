@@ -21,7 +21,10 @@ class CustomReleaseTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="zai-release-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.target = "x86_64-unknown-linux-gnu"
+        self.windows = os.name == "nt"
+        self.target = (
+            "x86_64-pc-windows-msvc" if self.windows else "x86_64-unknown-linux-gnu"
+        )
         self.tag = "zai-v0.1.0"
         self.package = self.root / "package"
         self.package.mkdir()
@@ -31,7 +34,9 @@ class CustomReleaseTest(unittest.TestCase):
         self.output = self.root / "output"
         self.output.mkdir()
         self.installs = self.root / "installed"
-        self.launcher = self.root / "bin/zai-codex"
+        self.launcher = self.root / (
+            "bin/zai-codex.cmd" if self.windows else "bin/zai-codex"
+        )
 
     def make_asset(self, target=None):
         target = target or self.target
@@ -86,12 +91,12 @@ class CustomReleaseTest(unittest.TestCase):
         upstream.write_text("upstream executable")
         with patch.object(installer.subprocess, "run"):
             self.install_asset(asset)
-            previous = self.launcher.resolve()
+            previous = next(self.installs.iterdir())
             self.install_asset(asset)
-        self.assertNotEqual(previous, self.launcher.resolve())
-        self.assertTrue(previous.is_file())
+        self.assertEqual(len(list(self.installs.iterdir())), 2)
+        self.assertTrue(previous.is_dir())
         self.assertEqual(upstream.read_text(), "upstream executable")
-        self.assertTrue((self.launcher.resolve().parent.parent / "NOTICE").is_file())
+        self.assertTrue((previous / "NOTICE").is_file())
         self.assertFalse(list(self.installs.glob(".zai-stage-*")))
 
     def test_windows_uses_launcher_without_symlink_privileges(self):
@@ -123,6 +128,8 @@ class CustomReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "existing executable"):
             self.install_asset(asset)
         self.assertEqual(self.launcher.read_text(), "foreign executable")
+        if self.windows:
+            return  # Windows uses regular .cmd launchers, never Unix symlinks.
         self.launcher.unlink()
         self.launcher.symlink_to(self.root / "foreign")
         with self.assertRaisesRegex(ValueError, "foreign launcher"):
@@ -133,14 +140,20 @@ class CustomReleaseTest(unittest.TestCase):
         asset = self.make_asset()
         with patch.object(installer.subprocess, "run"):
             self.install_asset(asset)
-            previous = self.launcher.resolve()
+            previous = next(self.installs.iterdir())
+            launcher_state = installer.launcher_state(
+                self.launcher, self.installs, self.windows
+            )
             with patch.object(
                 Path, "replace", side_effect=OSError("activation failed")
             ):
                 with self.assertRaisesRegex(OSError, "activation failed"):
                     self.install_asset(asset)
-        self.assertEqual(self.launcher.resolve(), previous)
-        self.assertEqual(list(self.installs.iterdir()), [previous.parent.parent])
+        self.assertEqual(
+            installer.launcher_state(self.launcher, self.installs, self.windows),
+            launcher_state,
+        )
+        self.assertEqual(list(self.installs.iterdir()), [previous])
 
     def test_target_mismatch_and_failed_smoke_leave_no_install(self):
         asset = self.make_asset()
