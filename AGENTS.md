@@ -33,6 +33,22 @@
 - Use `.codex/skills/sync-upstream/SKILL.md` when syncing upstream. Resolve conflicts in favor of the `zai-codex` customization intent while retaining compatible upstream improvements.
 - Perform repository changes in a claimed isolated worktree; preserve the shared checkout and other sessions' work.
 
+# Custom releases
+
+- Follow `RELEASING.md` for publishing and updating customized builds.
+- Release from a clean, validated commit on `origin/zai-codex`, never `main`.
+  `main` is the upstream mirror, not the release or customization branch.
+- Use `zai-v<version>` tags and assets from `phoenixzqy/zai-codex`. Installer
+  URLs must explicitly use `zai-codex`; never download an upstream build as a
+  substitute for a missing custom release.
+- Keep the short README intro and native Linux, macOS, and Windows install
+  commands current. Describe remote diagnostics as disabled, while local logs
+  remain available.
+- Package Apache `LICENSE`, `NOTICE`, modification attribution, reviewed
+  third-party notices, commit provenance, and SHA-256 sidecars for each asset.
+- Publish only after native validation of each advertised target. Hosted
+  Actions remain disabled; do not enable them to publish a release.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:

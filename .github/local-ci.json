@@ -103,6 +103,20 @@
       ]
     },
     {
+      "name": "Custom release installer and packaging tests",
+      "argv": [
+        "{python}",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_*zai_codex*.py"
+      ]
+    },
+    {
       "name": "macOS signing tooling tests",
       "argv": [
         "{python}",
