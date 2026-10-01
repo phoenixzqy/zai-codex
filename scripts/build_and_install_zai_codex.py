@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a release package and install it without replacing upstream Codex."""
+"""Build a release package and install it as the codex command."""
 
 import argparse
 import json
@@ -78,7 +78,7 @@ def main() -> int:
         Path(
             os.environ.get(
                 "ZAI_CODEX_BIN_LINK",
-                Path.home() / ".local/bin" / f"zai-codex{spec.exe_suffix}",
+                Path.home() / ".local/bin" / f"codex{spec.exe_suffix}",
             )
         ),
     )

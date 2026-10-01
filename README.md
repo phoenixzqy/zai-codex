@@ -13,7 +13,7 @@ Windows (PowerShell):
 irm https://phoenixzqy.github.io/install/zai-codex.ps1 | iex
 ```
 
-Add `~/.local/bin` to PATH if needed and run `zai-codex` (`zai-codex.cmd` on Windows). Sign in with your own eligible GitHub Copilot account. The installer checks SHA-256 and preserves `codex`; review the script before running it.
+Add `~/.local/bin` to PATH if needed and run `codex` (`codex.cmd` on Windows). Sign in with your own eligible GitHub Copilot account. The installer checks SHA-256 and installs this fork as `codex` and retains previous fork bundles; review the script before running it.
 
 Downloads become available after the first [custom release](https://phoenixzqy.github.io/apps/releases/?id=zai-codex). See [release instructions](RELEASING.md) or [build documentation](README.backup.md).
 
