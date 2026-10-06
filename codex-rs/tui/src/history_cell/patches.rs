@@ -191,15 +191,19 @@ impl HistoryCell for ViewImageHistoryCell {
     }
 }
 
-pub(crate) fn new_view_image_tool_call(path: LegacyAppPathString) -> ViewImageHistoryCell {
+pub(crate) fn new_view_image_tool_call(path: LegacyAppPathString) -> impl HistoryCell {
+    let local_path = path.to_inferred_abs_path();
     let filename = path
         .to_inferred_path_uri()
         .and_then(|path| path.basename())
         .unwrap_or_else(|| path.render_for_ui());
-    ViewImageHistoryCell {
-        filename,
-        path_label: path.into_string(),
-    }
+    crate::terminal_images::ImageHistoryCell::new(
+        ViewImageHistoryCell {
+            filename,
+            path_label: path.into_string(),
+        },
+        local_path,
+    )
 }
 
 pub(crate) fn new_image_generation_call(
@@ -207,7 +211,10 @@ pub(crate) fn new_image_generation_call(
     status: &str,
     revised_prompt: Option<String>,
     saved_path: Option<AbsolutePathBuf>,
-) -> PlainHistoryCell {
+) -> impl HistoryCell {
+    let preview_path = (status == "completed")
+        .then(|| saved_path.clone())
+        .flatten();
     let detail = revised_prompt.unwrap_or(call_id);
     let heading = if status == "failed" {
         vec!["✗ ".red().bold(), "Image generation failed".bold()].into()
@@ -222,5 +229,5 @@ pub(crate) fn new_image_generation_call(
         lines.push(vec!["  └ ".dim(), "Saved to: ".dim(), saved_path.into()].into());
     }
 
-    PlainHistoryCell { lines }
+    crate::terminal_images::ImageHistoryCell::new(PlainHistoryCell { lines }, preview_path)
 }

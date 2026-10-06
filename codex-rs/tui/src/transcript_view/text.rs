@@ -8,6 +8,7 @@
 
 use std::borrow::Cow;
 use std::ops::Range;
+use std::sync::Arc;
 
 #[path = "text_logical.rs"]
 mod logical;
@@ -49,6 +50,7 @@ pub(super) struct TextLayout {
     pub(super) separated: bool,
     pub(super) disclosure: bool,
     disclosure_control: Option<DisclosureControl>,
+    pub(super) image: Option<(Arc<crate::terminal_images::ImagePreview>, usize, u16, u16)>,
 }
 
 struct DisclosureControl {
@@ -80,6 +82,9 @@ impl TextLayout {
         if let Some(control) = &self.disclosure_control {
             layout =
                 layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
+        }
+        if let Some((image, _, _, _)) = &self.image {
+            layout = layout.with_image(Arc::clone(image));
         }
         if self.separated {
             layout.with_leading_separator()
@@ -167,6 +172,27 @@ impl TextLayout {
             if let Some(control) = &mut self.disclosure_control {
                 control.row += 1;
             }
+            if let Some((_, start, _, _)) = &mut self.image {
+                *start += 1;
+            }
+        }
+        self
+    }
+
+    pub(super) fn with_image(mut self, image: Arc<crate::terminal_images::ImagePreview>) -> Self {
+        let (columns, rows) = image.size(self.width);
+        let start = self.rows.len();
+        self.image = Some((image, start, columns, rows));
+        for _ in 0..rows {
+            self.rows.push(TextRow {
+                line: HyperlinkLine::from(""),
+                source: self.text.len()..self.text.len(),
+                line_end: None,
+                content_width: self.width,
+                first_column: 0,
+                prefix_columns: 0,
+                tabs: tabs::TabStops::default(),
+            });
         }
         self
     }
@@ -399,6 +425,7 @@ impl TextLayout {
             separated: false,
             disclosure: false,
             disclosure_control: None,
+            image: None,
         }
     }
 }

@@ -145,7 +145,7 @@ impl App {
         let mut feedback_tick = None;
         let mut blossom_tick = None;
         let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
-        tui.draw(screen_size.height, |frame| {
+        tui.draw_with_images(screen_size.height, |frame| {
             ratatui::widgets::Clear.render(
                 Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, available),
                 frame.buffer,
@@ -258,6 +258,11 @@ impl App {
             if let Some(position) = rendered_cursor {
                 frame.set_cursor_style(bottom.cursor_style(bottom_area));
                 frame.set_cursor_position(position);
+            }
+            if chat_widget.no_modal_or_popup_active() && !dashboard_visible {
+                view.image_placements()
+            } else {
+                Vec::new()
             }
         })?;
         if let Some((surface, tip)) = &turn_tip

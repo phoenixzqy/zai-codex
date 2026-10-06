@@ -94,6 +94,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
@@ -211,6 +212,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Stable diagnostic identities, independent of rendered wrapping and duplicate delivery.
     fn warning_keys(&self) -> Vec<WarningKey<'_>> {
         Vec::new()
+    }
+
+    /// Host-local image metadata for terminal previews; omitted from all textual surfaces.
+    fn image_preview(&self) -> Option<Arc<crate::terminal_images::ImagePreview>> {
+        None
     }
 
     /// Returns the logical lines for the main chat viewport.

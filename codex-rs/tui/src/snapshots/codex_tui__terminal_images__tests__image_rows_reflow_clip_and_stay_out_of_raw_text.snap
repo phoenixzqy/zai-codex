@@ -1,0 +1,26 @@
+---
+source: tui/src/terminal_images_tests.rs
+assertion_line: 71
+expression: snapshot
+---
+Viewport Rect { x: 0, y: 0, width: 24, height: 12 }
+|Viewed image preview.png|
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+|                        |
+Image Rect { x: 1, y: 1, width: 22, height: 6 }, first row 0, total rows 6
+Viewport Rect { x: 0, y: 0, width: 40, height: 5 }
+|                                        |
+|                                        |
+|                                        |
+|                                        |
+|                                        |
+Image Rect { x: 1, y: 0, width: 38, height: 5 }, first row 5, total rows 10

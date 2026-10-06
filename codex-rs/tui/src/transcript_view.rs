@@ -164,6 +164,41 @@ impl TranscriptView {
         }
     }
 
+    pub(crate) fn image_placements(&self) -> Vec<crate::terminal_images::ImagePlacement> {
+        let mut placements: Vec<crate::terminal_images::ImagePlacement> = Vec::new();
+        for (screen_row, visible) in self.visible.iter().enumerate() {
+            let Some((image, start, columns, rows)) = &visible.layout.image else {
+                continue;
+            };
+            let Some(offset) = visible
+                .row
+                .checked_sub(*start)
+                .filter(|offset| *offset < usize::from(*rows))
+            else {
+                continue;
+            };
+            if let Some(previous) = placements
+                .last_mut()
+                .filter(|previous| previous.preview.id == image.id)
+            {
+                previous.area.height += 1;
+            } else {
+                placements.push(crate::terminal_images::ImagePlacement {
+                    preview: Arc::clone(image),
+                    area: Rect::new(
+                        self.area.x + u16::from(self.area.width > 1),
+                        self.area.y + screen_row as u16,
+                        *columns,
+                        /*height*/ 1,
+                    ),
+                    first_row: offset as u16,
+                    total_rows: *rows,
+                });
+            }
+        }
+        placements
+    }
+
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         self.composer_tip = None;
         self.cache.begin_frame();

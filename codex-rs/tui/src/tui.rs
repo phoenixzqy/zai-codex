@@ -661,6 +661,7 @@ pub struct Tui {
     clear_thread_switch_on_draw: bool,
     screen_size: ScreenSizePolicy,
     ambient_pet_image_state: crate::pets::PetImageRenderState,
+    image_renderer: crate::terminal_images::ImageRenderer,
     pet_picker_preview_image_state: crate::pets::PetImageRenderState,
     alt_saved_viewport: Option<ratatui::layout::Rect>,
     #[cfg(unix)]
@@ -738,6 +739,7 @@ impl Tui {
             clear_thread_switch_on_draw: false,
             screen_size: ScreenSizePolicy::default(),
             ambient_pet_image_state: crate::pets::PetImageRenderState::default(),
+            image_renderer: crate::terminal_images::ImageRenderer::default(),
             pet_picker_preview_image_state: crate::pets::PetImageRenderState::default(),
             alt_saved_viewport: None,
             #[cfg(unix)]
@@ -1113,6 +1115,7 @@ impl Tui {
         if !self.alt_screen_enabled || !self.is_alt_screen_active() {
             return Ok(());
         }
+        self.image_renderer.clear(self.terminal.backend_mut())?;
         let result = ALTERNATE_SCREEN.leave(self.terminal.backend_mut());
         if ALTERNATE_SCREEN.is_active() {
             return result;
@@ -1267,6 +1270,18 @@ impl Tui {
         height: u16,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
+        self.draw_with_images(height, |frame| {
+            draw_fn(frame);
+            Vec::new()
+        })
+    }
+
+    pub(crate) fn draw_with_images(
+        &mut self,
+        height: u16,
+        draw_fn: impl FnOnce(&mut custom_terminal::Frame) -> Vec<crate::terminal_images::ImagePlacement>,
+    ) -> Result<()> {
+        let requester = self.frame_requester();
         let screen_size = self.take_event_screen_size()?;
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
@@ -1291,6 +1306,7 @@ impl Tui {
                     self.owned_screen,
                     self.overlay_input.captures_mouse(self.owned_screen),
                 )?;
+                self.image_renderer.clear(self.terminal.backend_mut())?;
             }
 
             if self.clear_thread_switch_on_draw {
@@ -1349,9 +1365,14 @@ impl Tui {
                 self.suspend_context.set_cursor_y(inline_area_bottom);
             }
 
+            self.image_renderer
+                .clear_placements(terminal.backend_mut())?;
+            let mut images = Vec::new();
             terminal.draw_with_size(screen_size, |frame| {
-                draw_fn(frame);
-            })
+                images = draw_fn(frame);
+            })?;
+            self.image_renderer
+                .draw(terminal.backend_mut(), &images, &requester)
         })??;
         Ok(())
     }

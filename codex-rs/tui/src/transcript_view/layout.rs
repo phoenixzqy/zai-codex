@@ -87,6 +87,7 @@ pub(super) struct CellPresentation {
     turn_tip_space: bool,
     expanded: bool,
     disclosure: bool,
+    images: bool,
 }
 
 impl TranscriptView {
@@ -154,6 +155,7 @@ impl TranscriptView {
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
             expanded,
             disclosure,
+            images: mode == HistoryRenderMode::Rich,
         };
         let shortcut = self
             .disclosure
@@ -229,7 +231,12 @@ impl LayoutCache {
             }
             return layout;
         }
-        let layout = render();
+        let mut layout = render();
+        if presentation.images
+            && let Some(preview) = cell.image_preview()
+        {
+            layout = layout.with_image(preview);
+        }
         let layout = if presentation.separated {
             layout.with_leading_separator()
         } else {
