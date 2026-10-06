@@ -32,11 +32,15 @@ async fn redraw_reuses_uploaded_pixels_and_deletes_only_own_images() {
     .unwrap();
     let pixels = load_pixels(&preview).unwrap();
     let transmission = pixels.transmission.clone();
-    let mut renderer = ImageRenderer::default();
+    let mut renderer = ImageRenderer {
+        protocol: Some(ImageProtocol::Kitty),
+        ..ImageRenderer::default()
+    };
     renderer.cache.push_back(CachedImage {
         id: preview.id,
         source: Arc::clone(&preview),
         pixels: Some(Arc::new(pixels)),
+        bands: None,
         uploaded: false,
     });
     let (tx, _) = tokio::sync::broadcast::channel(/*capacity*/ 1);
@@ -91,4 +95,63 @@ fn corrupt_pixels_never_reach_terminal_and_thumbnail_is_bounded() {
     let pixels = load_pixels(&preview).unwrap();
     assert_eq!((pixels.width, pixels.height), (640, 320));
     assert!(pixels.transmission.len() < 2 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn raster_protocols_reuse_cached_bands_and_clip_to_visible_rows() {
+    for protocol in [ImageProtocol::Sixel, ImageProtocol::KittyLocalFile] {
+        let dir = tempfile::tempdir().unwrap();
+        let preview = Arc::new(image_preview(dir.path(), /*id*/ 11));
+        image::RgbImage::new(/*width*/ 128, /*height*/ 64)
+            .save(preview.path.as_path())
+            .unwrap();
+        let pixels = Arc::new(load_pixels(&preview).unwrap());
+        let geometry = (20, 4, raster::cell_size());
+        let mut renderer = ImageRenderer {
+            protocol: Some(protocol),
+            ..ImageRenderer::default()
+        };
+        renderer.cache.push_back(CachedImage {
+            id: 11,
+            source: Arc::clone(&preview),
+            bands: Some(RasterRows::new(&pixels.raster, geometry, protocol).unwrap()),
+            pixels: Some(pixels),
+            uploaded: false,
+        });
+        let (tx, _) = tokio::sync::broadcast::channel(/*capacity*/ 1);
+        let requester = FrameRequester::new(tx);
+        let placement = ImagePlacement {
+            preview,
+            area: Rect::new(
+                /*x*/ 1, /*y*/ 4, /*width*/ 20, /*height*/ 2,
+            ),
+            first_row: 1,
+            total_rows: 4,
+        };
+        let mut output = Vec::new();
+        renderer
+            .draw(&mut output, std::slice::from_ref(&placement), &requester)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        let marker = if protocol == ImageProtocol::Sixel {
+            "\x1bP9;1;0q"
+        } else {
+            "\x1b]1337;File="
+        };
+        assert_eq!(output.matches(marker).count(), 2);
+        assert!(output.contains("\x1b[5;2H"));
+        assert!(output.contains("\x1b[6;2H"));
+        assert!(!output.contains("\x1b_G"));
+        std::fs::remove_file(placement.preview.path.as_path()).unwrap();
+        let mut redraw = Vec::new();
+        renderer.clear_placements(&mut redraw).unwrap();
+        renderer
+            .draw(&mut redraw, &[placement], &requester)
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(redraw).unwrap().matches(marker).count(),
+            2
+        );
+        assert!(renderer.pending.is_none());
+    }
 }

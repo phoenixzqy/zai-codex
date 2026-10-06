@@ -2,6 +2,8 @@
 
 mod renderer;
 pub(crate) use renderer::ImageRenderer;
+#[cfg(unix)]
+pub(crate) use renderer::raster::observe_cell_size;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -40,9 +42,12 @@ pub(crate) fn protocol() -> Option<crate::pets::ImageProtocol> {
     if std::env::var_os("CODEX_TUI_IMAGE_PREVIEWS").as_deref() == Some(std::ffi::OsStr::new("0")) {
         return None;
     }
-    crate::pets::detect_pet_image_support()
-        .protocol()
-        .filter(|protocol| *protocol == crate::pets::ImageProtocol::Kitty)
+    match crate::pets::detect_pet_image_support() {
+        crate::pets::PetImageSupport::Unsupported(
+            crate::pets::PetImageUnsupportedReason::Iterm2TooOld,
+        ) => Some(crate::pets::ImageProtocol::KittyLocalFile),
+        support => support.protocol(),
+    }
 }
 
 impl ImagePreview {

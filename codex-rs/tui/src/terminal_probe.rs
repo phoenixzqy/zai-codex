@@ -295,6 +295,11 @@ mod imp {
         if query_identity {
             query.extend_from_slice(b"\x1B[>c");
         }
+        if crate::pets::detect_pet_image_support().protocol()
+            == Some(crate::pets::ImageProtocol::Sixel)
+        {
+            query.splice(..0, b"\x1b[16t".iter().copied());
+        }
         tty.write_all(&query)?;
 
         let mut buffer = Vec::new();
@@ -380,6 +385,7 @@ mod imp {
         buffer: &[u8],
         keyboard_probe: StartupKeyboardEnhancementProbe,
     ) {
+        crate::terminal_images::observe_cell_size(buffer);
         if probe.cursor_position.is_none() {
             probe.cursor_position = parse_cursor_position(buffer);
         }

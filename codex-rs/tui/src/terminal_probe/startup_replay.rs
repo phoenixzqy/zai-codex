@@ -45,6 +45,16 @@ pub(super) fn startup_replay_input(input: &[u8]) -> Vec<u8> {
             continue;
         }
 
+        if input[cursor..].starts_with(b"\x1b[6;")
+            && let Some(end) = input[cursor..]
+                .iter()
+                .take(24)
+                .position(|byte| *byte == b't')
+        {
+            cursor += end + 1;
+            continue;
+        }
+
         if input[cursor..].starts_with(b"\x1b]") {
             if let Some((end, terminator_len)) = super::osc_payload_end(&input[cursor + 2..]) {
                 cursor += 2 + end + terminator_len;

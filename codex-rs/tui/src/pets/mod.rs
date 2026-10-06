@@ -23,7 +23,7 @@ mod image_protocol;
 mod model;
 mod picker;
 mod preview;
-mod sixel;
+pub(super) mod sixel;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -42,7 +42,6 @@ pub(crate) use asset_pack::builtin_spritesheet_path;
 pub(crate) use asset_pack::write_test_pack;
 pub(crate) use image_protocol::ImageProtocol;
 pub(crate) use image_protocol::PetImageSupport;
-#[cfg(test)]
 pub(crate) use image_protocol::PetImageUnsupportedReason;
 pub(crate) use image_protocol::detect_pet_image_support;
 pub(crate) use picker::PET_PICKER_VIEW_ID;

@@ -1,9 +1,13 @@
-//! Decode previews off the UI thread and retain at most eight thumbnail payloads.
-use super::ImagePlacement;
-use super::ImagePreview;
-use super::MAX_FILE_BYTES;
-use super::MAX_PIXELS;
-use crate::tui::FrameRequester;
+//! Decode one preview at a time off the UI thread; retain at most eight thumbnail payloads.
+
+use std::collections::VecDeque;
+use std::io;
+use std::io::Cursor;
+use std::io::Read;
+use std::io::Write;
+use std::sync::Arc;
+use std::sync::mpsc;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use crossterm::cursor::MoveTo;
@@ -12,38 +16,67 @@ use crossterm::cursor::SavePosition;
 use crossterm::queue;
 use image::ImageFormat;
 use image::ImageReader;
-use std::collections::VecDeque;
-use std::io;
-use std::io::Cursor;
-use std::io::Read;
-use std::io::Write;
-use std::sync::Arc;
-use std::sync::mpsc;
+
+use super::ImagePlacement;
+use super::ImagePreview;
+use super::MAX_FILE_BYTES;
+use super::MAX_PIXELS;
+use crate::pets::ImageProtocol;
+use crate::tui::FrameRequester;
+
+pub(crate) mod raster;
+use raster::RasterRows;
+
 const MAX_CACHED_IMAGES: usize = 8;
+
 pub(super) struct Pixels {
     width: u32,
     height: u32,
     transmission: String,
+    raster: Arc<image::RgbaImage>,
 }
+
 struct CachedImage {
     id: u32,
     source: Arc<ImagePreview>,
     pixels: Option<Arc<Pixels>>,
+    bands: Option<RasterRows>,
     uploaded: bool,
 }
+
 #[derive(Default)]
 pub(crate) struct ImageRenderer {
     cache: VecDeque<CachedImage>,
-    pending: Option<(Arc<ImagePreview>, mpsc::Receiver<Option<Arc<Pixels>>>)>,
+    pending: Option<(Arc<ImagePreview>, mpsc::Receiver<PreparedImage>)>,
+    protocol: Option<ImageProtocol>,
+    raster_areas: Vec<ratatui::layout::Rect>,
     placed: Vec<u32>,
 }
+
+enum PreparedImage {
+    Pixels(Option<Arc<Pixels>>),
+    Bands(Option<RasterRows>),
+}
+
 impl ImageRenderer {
+    /// Delete placements before text repaint, preserving terminal-side pixels for cheap reuse.
     pub(crate) fn clear_placements(&mut self, writer: &mut impl Write) -> io::Result<()> {
+        if !self.raster_areas.is_empty() {
+            queue!(writer, SavePosition)?;
+            for area in self.raster_areas.drain(..) {
+                for y in area.top()..area.bottom() {
+                    queue!(writer, MoveTo(area.x, y))?;
+                    write!(writer, "{}", " ".repeat(usize::from(area.width)))?;
+                }
+            }
+            queue!(writer, RestorePosition)?;
+        }
         for id in self.placed.drain(..) {
             write!(writer, "\x1b_Ga=d,d=i,i={id},q=2;\x1b\\")?;
         }
         Ok(())
     }
+
     pub(crate) fn clear(&mut self, writer: &mut impl Write) -> io::Result<()> {
         self.clear_placements(writer)?;
         for entry in self.cache.drain(..).filter(|entry| entry.uploaded) {
@@ -51,6 +84,7 @@ impl ImageRenderer {
         }
         Ok(())
     }
+
     pub(crate) fn draw(
         &mut self,
         writer: &mut impl Write,
@@ -62,16 +96,27 @@ impl ImageRenderer {
                 .as_ref()
                 .and_then(|(source, receiver)| match receiver.try_recv() {
                     Ok(pixels) => Some((Arc::clone(source), pixels)),
-                    Err(mpsc::TryRecvError::Disconnected) => Some((Arc::clone(source), None)),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        Some((Arc::clone(source), PreparedImage::Pixels(None)))
+                    }
                     Err(mpsc::TryRecvError::Empty) => None,
                 });
-        if let Some((source, pixels)) = completed {
-            self.cache.push_back(CachedImage {
-                id: source.id,
-                source,
-                pixels,
-                uploaded: false,
-            });
+        if let Some((source, prepared)) = completed {
+            let id = source.id;
+            match prepared {
+                PreparedImage::Pixels(pixels) => self.cache.push_back(CachedImage {
+                    id,
+                    source,
+                    pixels,
+                    uploaded: false,
+                    bands: None,
+                }),
+                PreparedImage::Bands(bands) => {
+                    if let Some(entry) = self.cache.iter_mut().find(|entry| entry.id == id) {
+                        entry.bands = bands;
+                    }
+                }
+            }
             self.pending = None;
         }
         while self.cache.len() > MAX_CACHED_IMAGES {
@@ -84,6 +129,8 @@ impl ImageRenderer {
         if placements.is_empty() {
             return Ok(());
         }
+        let protocol = self.protocol.or_else(super::protocol);
+        let cell_size = raster::cell_size();
         queue!(writer, SavePosition)?;
         for placement in placements.iter().take(MAX_CACHED_IMAGES) {
             let cached = self
@@ -96,13 +143,33 @@ impl ImageRenderer {
                 .and_then(|index| self.cache.remove(index));
             if let Some(mut entry) = cached {
                 if let Some(pixels) = &entry.pixels {
-                    if !entry.uploaded {
-                        writer.write_all(pixels.transmission.as_bytes())?;
-                        entry.uploaded = true;
+                    if let Some(protocol @ (ImageProtocol::Sixel | ImageProtocol::KittyLocalFile)) =
+                        protocol
+                    {
+                        let geometry = (placement.area.width, placement.total_rows, cell_size);
+                        if let Some(rows) = entry
+                            .bands
+                            .as_ref()
+                            .filter(|rows| rows.geometry == geometry)
+                        {
+                            rows.draw(writer, placement)?;
+                            self.raster_areas.push(placement.area);
+                        } else if self.pending.is_none() {
+                            let raster = Arc::clone(&pixels.raster);
+                            self.prepare(Arc::clone(&entry.source), requester, move || {
+                                PreparedImage::Bands(RasterRows::new(&raster, geometry, protocol))
+                            });
+                        }
+                    } else {
+                        if !entry.uploaded {
+                            writer.write_all(pixels.transmission.as_bytes())?;
+                            entry.uploaded = true;
+                        }
+                        queue!(writer, MoveTo(placement.area.x, placement.area.y))?;
+                        writer
+                            .write_all(placement_command(placement, pixels, entry.id).as_bytes())?;
+                        self.placed.push(entry.id);
                     }
-                    queue!(writer, MoveTo(placement.area.x, placement.area.y))?;
-                    writer.write_all(placement_command(placement, pixels, entry.id).as_bytes())?;
-                    self.placed.push(entry.id);
                 }
                 if entry.pixels.is_none()
                     && !placement
@@ -115,23 +182,35 @@ impl ImageRenderer {
                 self.cache.push_back(entry);
             } else if self.pending.is_none() {
                 let preview = Arc::clone(&placement.preview);
-                let requester = requester.clone();
-                let (sender, receiver) = mpsc::sync_channel(/*bound*/ 1);
-                self.pending = Some((Arc::clone(&preview), receiver));
-                tokio::task::spawn_blocking(move || {
+                self.prepare(Arc::clone(&preview), requester, move || {
                     let pixels = load_pixels(&preview).map(Arc::new);
                     preview
                         .failed
                         .store(pixels.is_none(), std::sync::atomic::Ordering::Relaxed);
-                    let _ = sender.send(pixels);
-                    requester.schedule_frame();
+                    PreparedImage::Pixels(pixels)
                 });
             }
         }
         queue!(writer, RestorePosition)?;
         writer.flush()
     }
+
+    fn prepare(
+        &mut self,
+        source: Arc<ImagePreview>,
+        requester: &FrameRequester,
+        work: impl FnOnce() -> PreparedImage + Send + 'static,
+    ) {
+        let requester = requester.clone();
+        let (sender, receiver) = mpsc::sync_channel(/*bound*/ 1);
+        self.pending = Some((source, receiver));
+        tokio::task::spawn_blocking(move || {
+            let _ = sender.send(work());
+            requester.schedule_frame();
+        });
+    }
 }
+
 pub(super) fn placement_command(
     placement: &ImagePlacement,
     pixels: &Pixels,
@@ -201,6 +280,7 @@ pub(super) fn load_pixels(preview: &ImagePreview) -> Option<Pixels> {
         width: image.width(),
         height: image.height(),
         transmission,
+        raster: Arc::new(image.to_rgba8()),
     })
 }
 

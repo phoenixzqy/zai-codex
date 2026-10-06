@@ -56,3 +56,13 @@ fn startup_replay_omits_terminal_color_replies_interleaved_with_bracketed_paste(
         response_after_paste
     );
 }
+
+#[test]
+fn cell_size_reports_are_filtered_without_changing_pastes() {
+    assert_eq!(
+        startup_replay_input(b"before\x1b[6;20;10tafter"),
+        b"beforeafter"
+    );
+    let pasted = b"\x1b[200~\x1b[6;20;10t\x1b[201~";
+    assert_eq!(startup_replay_input(pasted), pasted);
+}
