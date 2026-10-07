@@ -2160,7 +2160,7 @@ enum ResultMetadataAnalytics {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn direct_result_metadata_retained_budget_preserves_resource_access() -> Result<()> {
+async fn disabled_analytics_keeps_direct_results_without_raw_metadata() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
     let arguments = serde_json::json!({ "search": "retained-budget" });
@@ -2169,7 +2169,6 @@ async fn direct_result_metadata_retained_budget_preserves_resource_access() -> R
         "resource_coverage": "complete",
         "resources": [],
     });
-    let resource_only = serde_json::json!({ "openai/resource_access": resource_access });
     let result_metadata = serde_json::json!({
         "payload": "x".repeat(31 * 1024),
         "openai/resource_access": resource_access,
@@ -2268,7 +2267,7 @@ async fn direct_result_metadata_retained_budget_preserves_resource_access() -> R
         .filter(|item| matches!(item, ResponseItem::FunctionCallOutput { .. }))
         .collect::<Vec<_>>();
     assert_eq!(outputs.len(), call_ids.len());
-    for (index, call_id) in call_ids.iter().enumerate() {
+    for call_id in &call_ids {
         let item = outputs
             .iter()
             .find(|item| matches!(item, ResponseItem::FunctionCallOutput { call_id: Some(id), .. } if id == call_id))
@@ -2288,15 +2287,7 @@ async fn direct_result_metadata_retained_budget_preserves_resource_access() -> R
                 .ends_with(RESULT_METADATA_TOOL)
         );
         assert_eq!(calls[0]["arguments"], arguments);
-        assert_eq!(
-            calls[0]["tool_result_metadata"],
-            if index < 32 {
-                &result_metadata
-            } else {
-                &resource_only
-            }
-            .clone(),
-        );
+        assert!(calls[0].get("tool_result_metadata").is_none());
     }
     test.codex.shutdown_and_wait().await?;
     Ok(())
@@ -2483,21 +2474,19 @@ async fn result_metadata_preserves_results_within_request_budget(
             }
         }
     }
+    assert!(captured.iter().all(|item| !item.has_tool_result_metadata()));
     assert!(
         captured
             .iter()
             .map(codex_protocol::models::executed_tool_call_metadata_bytes)
             .sum::<usize>()
-            > 2 * 1024 * 1024
+            <= 2 * 1024 * 1024
     );
     let captured = serde_json::to_value(captured)?;
     for (input, expected_metadata) in [
         // Ungranted custom inference endpoints strip raw metadata, including omission markers.
-        (request.input(), None),
-        (
-            captured.as_array().unwrap().clone(),
-            Some(result_metadata.clone()),
-        ),
+        (request.input(), None::<Value>),
+        (captured.as_array().unwrap().clone(), None),
     ] {
         let mut calls = Vec::new();
         for output in &input {
@@ -2810,7 +2799,7 @@ async fn code_mode_result_metadata_follows_runtime_recording_enablement() -> Res
         .iter()
         .find(|item| item["type"] == "custom_tool_call_output" && item["call_id"] == "call-on")
         .expect("captured exec output after runtime enablement");
-    let expected_metadata = Some(result_metadata);
+    let expected_metadata = None;
     assert_result_metadata_call(captured_output, &arguments, expected_metadata);
     Ok(())
 }
@@ -2949,7 +2938,7 @@ async fn code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_re
     let captured = codex_core::test_support::history_with_tool_call_metadata(&test.codex).await;
     let captured = serde_json::to_value(captured)?;
     // A's accepted result must update the output that first reported it, not the final wait.
-    let expected_metadata = Some(original_metadata);
+    let expected_metadata = None;
     for (call_id, call_type, expected_metadata) in [
         (
             original_output["call_id"].as_str().unwrap(),
@@ -3098,7 +3087,7 @@ async fn code_mode_late_truncated_result_metadata_survives_waits() -> Result<()>
             &captured_output["internal_chat_message_metadata_passthrough"]["executed_tool_calls"];
         assert_eq!(captured_calls.as_array().unwrap().len(), 1);
         assert_eq!(captured_calls[0]["arguments"], truncated["arguments"]);
-        assert_eq!(captured_calls[0]["tool_result_metadata"], metadata);
+        assert!(captured_calls[0].get("tool_result_metadata").is_none());
         assert_ne!(
             captured_output["internal_chat_message_metadata_passthrough"]["tool_calls_complete"],
             true
@@ -3109,7 +3098,11 @@ async fn code_mode_late_truncated_result_metadata_survives_waits() -> Result<()>
             .iter()
             .find(|item| item["type"] == "function_call_output" && item["call_id"] == "call-3")
             .expect("captured later wait output");
-        assert_result_metadata_call(later_output, &later_arguments, Some(metadata.clone()));
+        assert_result_metadata_call(
+            later_output,
+            &later_arguments,
+            /*expected_metadata*/ None,
+        );
         if phase == 0 {
             let terminal = responses::mount_function_call_agent_response(
                 &server,

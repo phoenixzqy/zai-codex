@@ -3583,7 +3583,9 @@ async fn guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history() ->
         ])
         .await;
 
-        let (mut session, turn) = guardian_test_session_and_turn_with_base_url(server.uri()).await;
+        let (mut session, mut turn) = guardian_test_session_and_turn_with_base_url(server.uri()).await;
+        Arc::make_mut(&mut Arc::get_mut(&mut turn).expect("turn should be uniquely owned").config)
+            .feedback_enabled = true;
         // Isolate feedback from other tests using the fixed parent session ID.
         Arc::get_mut(&mut session)
             .expect("session should be uniquely owned")

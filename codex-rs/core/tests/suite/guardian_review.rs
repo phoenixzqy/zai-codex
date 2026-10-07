@@ -2028,6 +2028,7 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
         })
         .with_config(move |config| {
             config.otel.log_guardian_assessments = log_assessments;
+            config.feedback_enabled = true;
             config.otel.exporter = OtelExporterKind::OtlpGrpc {
                 endpoint: "http://127.0.0.1:1".to_string(),
                 headers: Default::default(),

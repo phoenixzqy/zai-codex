@@ -543,9 +543,11 @@ trust_level = "trusted"
             .with_context(|| format!("daemon status timed out: {output}"))??;
         }
         if analytics {
-            tokio::time::timeout(Duration::from_secs(/*secs*/ 10), metric_rx.recv())
-                .await?
-                .context("metrics export while the TUI is running")?;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(/*millis*/ 500), metric_rx.recv())
+                    .await
+                    .is_err()
+            );
         }
         let startup_result = observed.as_ref().map(|result| result.as_ref().map(|_| ()));
         assert!(
@@ -608,69 +610,7 @@ trust_level = "trusted"
             .filter(|request| request.url.path() == "/metrics")
             .map(|request| serde_json::from_slice::<Value>(&request.body))
             .collect::<serde_json::Result<Vec<_>>>()?;
-        if analytics {
-            let exported = metrics
-                .iter()
-                .flat_map(|payload| payload["resourceMetrics"].as_array().into_iter().flatten())
-                .flat_map(|resource| resource["scopeMetrics"].as_array().into_iter().flatten())
-                .flat_map(|scope| scope["metrics"].as_array().into_iter().flatten())
-                .collect::<Vec<_>>();
-            if backend == "embedded" {
-                let update = exported
-                    .iter()
-                    .find(|metric| metric["name"] == "codex.daemon.update")
-                    .context("handoff metric")?;
-                let update_point = &update["sum"]["dataPoints"][0];
-                assert_eq!(update_point["asInt"], 1);
-            }
-            let point = exported
-                .iter()
-                .filter(|metric| metric["name"] == "codex.tui.start")
-                .flat_map(|metric| metric["sum"]["dataPoints"].as_array().into_iter().flatten())
-                .next()
-                .context("codex.tui.start data point")?;
-            let tags = point["attributes"]
-                .as_array()
-                .context("codex.tui.start attributes")?
-                .iter()
-                .map(|attribute| {
-                    Ok((
-                        attribute["key"].as_str().context("metric tag key")?,
-                        attribute["value"]["stringValue"]
-                            .as_str()
-                            .context("metric tag value")?,
-                    ))
-                })
-                .collect::<anyhow::Result<HashMap<_, _>>>()?;
-            let mut expected_tags = HashMap::from([
-                ("app_server_mode", "in_process"),
-                ("terminal_name", "unknown"),
-                ("multiplexer", "none"),
-                ("daemon_selection_reason", "incompatible_option"),
-                (
-                    "daemon_auto_start",
-                    if backend == "daemon" {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    },
-                ),
-                ("auto_update", "enabled"),
-                ("auto_update_setting", "default"),
-                ("update_interval_setting", "default"),
-                ("shutdown_grace_setting", "default"),
-            ]);
-            if backend == "daemon" {
-                expected_tags.extend([
-                    ("auto_update", "disabled"),
-                    ("auto_update_setting", "configured"),
-                    ("shutdown_grace_setting", "configured"),
-                ]);
-            }
-            assert_eq!(tags, expected_tags);
-        } else {
-            assert!(metrics.is_empty(), "analytics disabled");
-        }
+        assert!(metrics.is_empty(), "metrics exports remain disabled");
         let (body, checkout, metadata) = observed
             .with_context(|| {
                 format!(
