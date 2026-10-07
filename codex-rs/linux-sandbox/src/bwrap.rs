@@ -362,7 +362,10 @@ fn create_bwrap_flags(
         args.push("--tmpfs".to_string());
         args.push(WSL_INTEROP_DIR.to_string());
     }
-    if (options.mask_wsl_interop || options.mask_wslg_distro) && !options.mount_proc {
+    if (options.mask_wsl_interop || options.mask_wslg_distro)
+        && !options.mount_proc
+        && !options.inherit_pid_namespace
+    {
         // Without a fresh procfs, the root bind retains the host procfs.
         // Hide it so host process roots cannot restore the masked WSL views.
         args.push("--tmpfs".to_string());

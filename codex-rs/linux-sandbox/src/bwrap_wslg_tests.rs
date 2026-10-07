@@ -86,6 +86,46 @@ fn wslg_mask_follows_filesystem_grants_and_denials(root_access: FileSystemAccess
 }
 
 #[test]
+fn explicit_pid_inheritance_preserves_proc_with_wsl_masks() {
+    let args = create_bwrap_command_args(
+        vec!["/bin/true".to_string()],
+        &FileSystemSandboxPolicy::read_only(),
+        Path::new("/"),
+        Path::new("/"),
+        BwrapOptions {
+            mount_proc: false,
+            inherit_pid_namespace: true,
+            mask_wsl_interop: true,
+            mask_wslg_distro: true,
+            ..Default::default()
+        },
+    )
+    .expect("create inherited proc with WSL masks")
+    .args;
+    assert!(!args.windows(2).any(|args| args == ["--tmpfs", "/proc"]));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg == "--unshare-pid" || arg == "--proc")
+    );
+    assert!(args.iter().any(|arg| arg == "--unshare-user"));
+    assert!(
+        args.windows(2)
+            .any(|args| args == ["--tmpfs", WSL_INTEROP_DIR])
+    );
+    assert!(args.windows(6).any(|args| {
+        args == [
+            "--perms",
+            "000",
+            "--tmpfs",
+            WSLG_DISTRO_ROOT,
+            "--remount-ro",
+            WSLG_DISTRO_ROOT,
+        ]
+    }));
+}
+
+#[test]
 fn wslg_mask_is_omitted_when_policy_already_hides_an_ancestor() {
     for denied in ["/mnt", "/mnt/wslg", WSLG_DISTRO_ROOT] {
         let mut policy = FileSystemSandboxPolicy::read_only();

@@ -25,7 +25,7 @@ async fn wslg_duplicate_view_is_masked_with_and_without_fresh_procfs() {
     let profile = serde_json::to_string(&PermissionProfile::read_only())
         .expect("serialize read-only profile");
 
-    for no_proc in [false, true] {
+    for (no_proc, inherit_pid_namespace) in [(false, false), (true, false), (false, true)] {
         let mut command = tokio::process::Command::new(codex_linux_sandbox_exe());
         command
             .arg("--sandbox-policy-cwd")
@@ -34,8 +34,13 @@ async fn wslg_duplicate_view_is_masked_with_and_without_fresh_procfs() {
         if no_proc {
             command.arg("--no-proc");
         }
+        if inherit_pid_namespace {
+            command.arg("--inherit-pid-namespace");
+        }
         // Inspect the protection itself, without accessing data through the alias.
-        let script = if no_proc {
+        let script = if inherit_pid_namespace {
+            "stat -c %a /mnt/wslg/distro && stat -f -c %T /mnt/wslg/distro && cat \"$1\" && read -r pid rest < /proc/self/stat && test \"$$\" = \"$pid\" && ! readlink /proc/\"$2\"/root && ! readlink /proc/\"$2\"/cwd && ! readlink /proc/\"$2\"/fd/0 && test ! -r /proc/\"$2\"/root/\"$1\""
+        } else if no_proc {
             "stat -c %a /mnt/wslg/distro && stat -f -c %T /mnt/wslg/distro && cat \"$1\" && test ! -e /proc/1"
         } else {
             "stat -c %a /mnt/wslg/distro && stat -f -c %T /mnt/wslg/distro && cat \"$1\""
@@ -45,6 +50,7 @@ async fn wslg_duplicate_view_is_masked_with_and_without_fresh_procfs() {
             command
                 .args(["--", "/bin/sh", "-c", script, "sh"])
                 .arg(&allowed)
+                .arg(std::process::id().to_string())
                 .kill_on_drop(true)
                 .output(),
         )
@@ -53,8 +59,7 @@ async fn wslg_duplicate_view_is_masked_with_and_without_fresh_procfs() {
         .expect("sandbox helper should start");
         assert!(
             output.status.success(),
-            "WSLg mask check failed (no_proc={no_proc}): {}",
-            String::from_utf8_lossy(&output.stderr)
+            "WSLg mask check failed (no_proc={no_proc}, inherit_pid_namespace={inherit_pid_namespace}): {output:?}",
         );
         assert_eq!(output.stdout, b"0\ntmpfs\nallowed\n");
     }

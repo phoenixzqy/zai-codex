@@ -118,6 +118,7 @@ fi
             // Notifications may precede the process/start response, so consume both.
             let mut started = false;
             let mut exit_code = None;
+            let mut notifications = Vec::new();
             while !started || exit_code.is_none() {
                 let mut line = String::new();
                 anyhow::ensure!(stdout.read_line(&mut line).await? > 0, "executor closed");
@@ -129,8 +130,9 @@ fi
                 if message["method"] == "process/exited" {
                     exit_code = message["params"]["exitCode"].as_i64();
                 }
+                notifications.push(message);
             }
-            assert_eq!(exit_code, Some(if inherit { 0 } else { 1 }));
+            assert_eq!(exit_code, Some(if inherit { 0 } else { 1 }), "inherit={inherit}, minimal={minimal}; notifications={notifications:?}");
             send_json_line(&mut stdin, &serde_json::json!({
                 "id": 3, "method": "fs/readFile", "params": {"path": file_uri, "sandbox": sandbox}
             })).await?;

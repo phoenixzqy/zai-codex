@@ -347,6 +347,11 @@ printf 'command started\n'
 IFS=' ' read -r proc_pid rest < /proc/self/stat
 test "$$" = "$proc_pid"
 test "$(readlink /proc/self/ns/pid)" = "$CODEX_TEST_PID_NAMESPACE"
+for link in root cwd exe; do
+    ! readlink "/proc/$CODEX_TEST_HOST_PID/$link"
+done
+! readlink "/proc/$CODEX_TEST_HOST_PID/fd/0"
+test ! -r "/proc/$CODEX_TEST_HOST_PID/root$CODEX_TEST_PROTECTED_FILE"
 sleep 30 &
 child=$!
 trap 'kill "$child"; wait "$child" || :' EXIT
@@ -369,8 +374,12 @@ printf 'consistent PIDs; restrictions preserved\n'
     let legacy_probe = r#"
 set -eu
 printf 'command started\n'
-IFS=' ' read -r proc_pid rest < /proc/self/stat
-test "$$" != "$proc_pid"
+if [ "$CODEX_TEST_PROC_MASKED" = true ]; then
+    test ! -e /proc/self/stat
+else
+    IFS=' ' read -r proc_pid rest < /proc/self/stat
+    test "$$" != "$proc_pid"
+fi
 printf 'legacy proc fallback\n'
 "#;
 
@@ -391,6 +400,20 @@ printf 'legacy proc fallback\n'
         env.insert(
             "CODEX_TEST_PID_NAMESPACE".to_string(),
             pid_namespace.display().to_string(),
+        );
+        env.insert(
+            "CODEX_TEST_HOST_PID".to_string(),
+            std::process::id().to_string(),
+        );
+        let root = std::fs::metadata("/").expect("root metadata");
+        let host_proc_masked = std::path::Path::new("/run/WSL").is_dir()
+            || std::fs::symlink_metadata("/mnt/wslg/distro").is_ok_and(|metadata| {
+                use std::os::unix::fs::MetadataExt;
+                metadata.is_dir() && (metadata.dev(), metadata.ino()) == (root.dev(), root.ino())
+            });
+        env.insert(
+            "CODEX_TEST_PROC_MASKED".to_string(),
+            host_proc_masked.to_string(),
         );
         env.insert(
             "CODEX_TEST_PROTECTED_FILE".to_string(),

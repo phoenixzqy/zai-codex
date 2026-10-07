@@ -362,6 +362,11 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
         }
     }
     // Do not let a snapshot resurrect stale runtime state when it is inactive.
+    let builtin_prefix = if session_shell.shell_type == ShellType::Sh {
+        "command"
+    } else {
+        "builtin"
+    };
     let (override_captures, override_exports) = build_override_exports(
         &override_env,
         &[
@@ -369,8 +374,9 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
             CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS_ENV_VAR,
             PLUGIN_METRICS_OUTPUT_ENV_VAR,
         ],
+        builtin_prefix,
     );
-    let (proxy_captures, proxy_exports) = build_proxy_env_exports(env);
+    let (proxy_captures, proxy_exports) = build_proxy_env_exports(env, builtin_prefix);
     let (env_captures, replayed_startup_capture, env_exports) = if brokered {
         let bash_env_key = SNAPSHOT_ORIGINAL_BASH_ENV_ENV_KEY;
         let posix_env_key = SNAPSHOT_ORIGINAL_POSIX_ENV_ENV_KEY;
@@ -435,11 +441,10 @@ __codex_snapshot_env_is_protected() (
 if __codex_snapshot_env_is_protected "$__CODEX_SNAPSHOT_CURRENT_ENV"; then
   if [ -n "$__CODEX_SNAPSHOT_ORIGINAL_ENV_SET" ] &&
     ! __codex_snapshot_env_is_protected "$__CODEX_SNAPSHOT_ORIGINAL_EXPANDED_ENV"; then
-    builtin export ENV="$__CODEX_SNAPSHOT_ORIGINAL_ENV" 2>/dev/null ||
-      command export ENV="$__CODEX_SNAPSHOT_ORIGINAL_ENV" || exit 1
+    {builtin_prefix} export ENV="$__CODEX_SNAPSHOT_ORIGINAL_ENV" || exit 1
     [ "${{ENV-}}" = "$__CODEX_SNAPSHOT_ORIGINAL_ENV" ] || exit 1
   else
-    builtin unset ENV 2>/dev/null || command unset ENV || exit 1
+    {builtin_prefix} unset ENV || exit 1
     [ -z "${{ENV+x}}" ] || exit 1
   fi
 fi
@@ -584,6 +589,7 @@ fn build_brokered_credential_exports(env: &HashMap<String, String>, remove_copie
 fn build_override_exports(
     explicit_env_overrides: &HashMap<String, String>,
     restore_even_when_absent: &[&str],
+    builtin_prefix: &str,
 ) -> (String, String) {
     let mut keys = explicit_env_overrides
         .keys()
@@ -595,10 +601,13 @@ fn build_override_exports(
     keys.sort_unstable();
     keys.dedup();
 
-    build_override_exports_for_keys("__CODEX_SNAPSHOT_OVERRIDE", &keys)
+    build_override_exports_for_keys("__CODEX_SNAPSHOT_OVERRIDE", &keys, builtin_prefix)
 }
 
-fn build_proxy_env_exports(env: &HashMap<String, String>) -> (String, String) {
+fn build_proxy_env_exports(
+    env: &HashMap<String, String>,
+    builtin_prefix: &str,
+) -> (String, String) {
     let mut keys = PROXY_ENV_KEYS
         .iter()
         .copied()
@@ -615,7 +624,7 @@ fn build_proxy_env_exports(env: &HashMap<String, String>) -> (String, String) {
     keys.dedup();
 
     let (captures, restores) =
-        build_override_exports_for_keys("__CODEX_SNAPSHOT_PROXY_OVERRIDE", &keys);
+        build_override_exports_for_keys("__CODEX_SNAPSHOT_PROXY_OVERRIDE", &keys, builtin_prefix);
     let key = PROXY_ACTIVE_ENV_KEY;
     let proxy_blocks = (
         format!("{captures}\n__CODEX_SNAPSHOT_PROXY_ENV_SET=\"${{{key}+x}}\""),
@@ -649,7 +658,11 @@ fn build_codex_proxy_git_ssh_command_exports() -> (String, String) {
     (String::new(), String::new())
 }
 
-fn build_override_exports_for_keys(variable_prefix: &str, keys: &[&str]) -> (String, String) {
+fn build_override_exports_for_keys(
+    variable_prefix: &str,
+    keys: &[&str],
+    builtin_prefix: &str,
+) -> (String, String) {
     if keys.is_empty() {
         return (String::new(), String::new());
     }
@@ -671,7 +684,7 @@ fn build_override_exports_for_keys(variable_prefix: &str, keys: &[&str]) -> (Str
             let set_var = format!("{variable_prefix}_SET_{idx}");
             let value_var = format!("{variable_prefix}_{idx}");
             format!(
-                "if [ -n \"${{{set_var}}}\" ]; then\n  if [ -z \"${{{key}+x}}\" ] || [ \"${{{key}-}}\" != \"${{{value_var}}}\" ]; then export {key}=\"${{{value_var}}}\"; else export {key}; fi\nelse builtin unset {key} 2>/dev/null || command unset {key}; fi\nbuiltin unset {set_var} {value_var} 2>/dev/null || command unset {set_var} {value_var}"
+                "if [ -n \"${{{set_var}}}\" ]; then\n  if [ -z \"${{{key}+x}}\" ] || [ \"${{{key}-}}\" != \"${{{value_var}}}\" ]; then export {key}=\"${{{value_var}}}\"; else export {key}; fi\nelse {builtin_prefix} unset {key}; fi\n{builtin_prefix} unset {set_var} {value_var}"
             )
         })
         .collect::<Vec<_>>()
@@ -923,3 +936,7 @@ mod prepare_powershell_command_tests {
 #[cfg(all(test, unix))]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "posix_snapshot_tests.rs"]
+mod posix_snapshot_tests;
