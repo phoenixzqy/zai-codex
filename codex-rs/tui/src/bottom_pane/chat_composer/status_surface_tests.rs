@@ -13,6 +13,7 @@ fn composer() -> ChatComposer {
         "Ask Codex".to_string(),
         /*disable_paste_burst*/ true,
     );
+    composer.footer.is_wsl = false;
     composer.set_status_line_enabled(/*enabled*/ true);
     composer.set_status_line(Some(Line::from("MODEL · ~/project · Context 20% used")));
     composer
@@ -364,6 +365,7 @@ fn slash_popup_preserves_footer_and_selection_style() {
         "Ask Codex to do anything".to_string(),
         /*disable_paste_burst*/ true,
     );
+    composer.footer.is_wsl = false;
     composer.set_status_line_enabled(/*enabled*/ true);
     composer.set_status_line(Some("model · high · fast".into()));
     for ch in ['/', 'm'] {

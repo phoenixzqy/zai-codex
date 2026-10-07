@@ -49,24 +49,16 @@ pub(crate) fn observe_cell_size(input: &[u8]) {
     }
 }
 
-pub(super) fn cell_size() -> (u16, u16) {
-    let size = crossterm::terminal::window_size()
+pub(crate) fn cell_size() -> Option<(u16, u16)> {
+    let measured = crossterm::terminal::window_size()
         .ok()
-        .filter(|size| size.columns > 0 && size.rows > 0 && size.width > 0 && size.height > 0);
+        .filter(|size| size.columns > 0 && size.rows > 0 && size.width > 0 && size.height > 0)
+        .map(|size| (size.width / size.columns, size.height / size.rows));
+    // Console-host font metrics are not authoritative for Windows Terminal/ConPTY.
     let queried = CELL_SIZE.load(Ordering::Relaxed);
-    let (width, height) = size
-        .map(|size| (size.width / size.columns, size.height / size.rows))
-        .unwrap_or_else(|| {
-            if queried != 0 {
-                ((queried >> 16) as u16, queried as u16)
-            } else {
-                (4, 8)
-            }
-        });
-    (
-        width.clamp(/*min*/ 1, /*max*/ 16),
-        height.clamp(/*min*/ 1, /*max*/ 32),
-    )
+    let (width, height) =
+        measured.or_else(|| (queried != 0).then_some(((queried >> 16) as u16, queried as u16)))?;
+    (width > 0 && height > 0).then_some((width, height))
 }
 
 pub(super) struct RasterRows {
@@ -83,6 +75,10 @@ impl RasterRows {
         let (columns, rows, (cell_width, cell_height)) = geometry;
         let width = u32::from(columns) * u32::from(cell_width);
         let height = u32::from(rows) * u32::from(cell_height);
+        // Bound allocation without shrinking measured cells, which would leave Sixel gaps.
+        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 1024 * 1024 {
+            return None;
+        }
         let raster = image::imageops::resize(raster, width, height, FilterType::Triangle);
         let bands = (0..rows)
             .map(|row| {

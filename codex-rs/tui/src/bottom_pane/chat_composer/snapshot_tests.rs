@@ -122,3 +122,29 @@ fn draft_and_voice_composer_snapshots() {
         },
     );
 }
+
+#[test]
+fn shortcut_paste_hint_uses_the_native_fixture_platform() {
+    snapshot_composer_state_with_width(
+        "composer_paste_native",
+        /*width*/ 80,
+        /*enhanced_keys_supported*/ false,
+        |composer| {
+            composer.footer.is_wsl = false;
+            composer.footer.mode = FooterMode::ShortcutOverlay;
+        },
+    );
+}
+
+#[test]
+fn shortcut_paste_hint_uses_the_wsl_fixture_platform() {
+    snapshot_composer_state_with_width(
+        "composer_paste_wsl",
+        /*width*/ 80,
+        /*enhanced_keys_supported*/ false,
+        |composer| {
+            composer.footer.is_wsl = true;
+            composer.footer.mode = FooterMode::ShortcutOverlay;
+        },
+    );
+}

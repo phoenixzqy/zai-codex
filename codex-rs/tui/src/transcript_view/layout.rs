@@ -102,10 +102,19 @@ impl TranscriptView {
             return None;
         }
         let key = self.entry_key(cells, index);
+        let width = self.area.width.max(/*other*/ 1);
         if let Some(layout) = self
-            .snapshot()
-            .and_then(|snapshot| snapshot.pinned.get(&key))
+            .snapshot_mut()
+            .and_then(|snapshot| snapshot.pinned.get_mut(&key))
         {
+            if layout
+                .image
+                .as_ref()
+                .is_some_and(|(image, _, _, _)| !image.is_available())
+            {
+                // Retain selected source text, but drop a failed terminal-only presentation once.
+                *layout = Arc::new(layout.rewrap(width));
+            }
             return Some(Arc::clone(layout));
         }
         if index == cells.len() && self.snapshot().is_some() {

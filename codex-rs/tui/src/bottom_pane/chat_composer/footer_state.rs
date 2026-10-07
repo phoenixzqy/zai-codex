@@ -202,6 +202,8 @@ impl super::ChatComposer {
 }
 
 pub(super) struct FooterState {
+    /// Host clipboard shortcut platform, resolved once and explicit in snapshot fixtures.
+    pub(super) is_wsl: bool,
     pub(super) quit_shortcut_expires_at: Option<Instant>,
     pub(super) quit_shortcut_key: KeyBinding,
     pub(super) esc_backtrack_hint: bool,

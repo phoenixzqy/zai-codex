@@ -199,6 +199,9 @@
 //! overwriting the placeholder or normal cursor. Hidden frames do not schedule animation redraws;
 //! motion settings, the starfield preference, and true-color support also gate the effect.
 //!
+//! Shortcut help captures the host clipboard platform when the composer is created;
+//! snapshot fixtures specify it explicitly to cover native and WSL hints consistently.
+//!
 //! # Large Paste Placeholders
 //!
 //! Large pastes insert an element placeholder in the buffer and store the full text in
@@ -725,6 +728,10 @@ impl ChatComposer {
         disable_paste_burst: bool,
         config: ChatComposerConfig,
     ) -> Self {
+        #[cfg(target_os = "linux")]
+        let is_wsl = crate::clipboard_paste::is_probably_wsl();
+        #[cfg(not(target_os = "linux"))]
+        let is_wsl = false;
         let use_shift_enter_hint = enhanced_keys_supported;
         let default_keymap = RuntimeKeymap::defaults();
         let default_editor_keymap = default_keymap.editor.clone();
@@ -737,6 +744,7 @@ impl ChatComposer {
             history: ChatComposerHistory::new(),
             agents_navigation_enabled: false,
             footer: FooterState {
+                is_wsl,
                 quit_shortcut_expires_at: None,
                 quit_shortcut_key: key_hint::ctrl(KeyCode::Char('c')),
                 esc_backtrack_hint: false,
@@ -3844,16 +3852,7 @@ impl ChatComposer {
 
     fn footer_props(&self) -> FooterProps {
         let mode = self.footer_mode();
-        let is_wsl = {
-            #[cfg(target_os = "linux")]
-            {
-                mode == FooterMode::ShortcutOverlay && crate::clipboard_paste::is_probably_wsl()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                false
-            }
-        };
+        let is_wsl = mode == FooterMode::ShortcutOverlay && self.footer.is_wsl;
 
         FooterProps {
             mode,
@@ -5095,16 +5094,15 @@ mod tests {
     pub(super) fn new_test_composer() -> (ChatComposer, UnboundedReceiver<AppEvent>) {
         let (tx, rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
-        (
-            ChatComposer::new(
-                /*has_input_focus*/ true,
-                sender,
-                /*enhanced_keys_supported*/ false,
-                "Ask Codex to do anything".to_string(),
-                /*disable_paste_burst*/ false,
-            ),
-            rx,
-        )
+        let mut composer = ChatComposer::new(
+            /*has_input_focus*/ true,
+            sender,
+            /*enhanced_keys_supported*/ false,
+            "Ask Codex to do anything".to_string(),
+            /*disable_paste_burst*/ false,
+        );
+        composer.footer.is_wsl = false;
+        (composer, rx)
     }
 
     #[test]
@@ -5291,6 +5289,7 @@ mod tests {
             "Ask Codex to do anything".to_string(),
             /*disable_paste_burst*/ false,
         );
+        composer.footer.is_wsl = false;
         setup(&mut composer);
         let footer_props = composer.footer_props();
         let footer_lines = footer_height(&footer_props, width);

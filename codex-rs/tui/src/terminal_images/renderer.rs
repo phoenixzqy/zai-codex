@@ -91,6 +91,7 @@ impl ImageRenderer {
         writer: &mut impl Write,
         placements: &[ImagePlacement],
         requester: &FrameRequester,
+        cell_size: Option<(u16, u16)>,
     ) -> io::Result<()> {
         let completed =
             self.pending
@@ -148,8 +149,9 @@ impl ImageRenderer {
         if placements.is_empty() {
             return Ok(());
         }
-        let protocol = self.protocol.or_else(super::protocol);
-        let cell_size = raster::cell_size();
+        let Some(protocol) = self.protocol.or_else(super::protocol) else {
+            return Ok(());
+        };
         queue!(writer, SavePosition)?;
         for placement in placements.iter().take(MAX_CACHED_IMAGES) {
             let cached = self
@@ -162,8 +164,18 @@ impl ImageRenderer {
                 .and_then(|index| self.cache.remove(index));
             if let Some(mut entry) = cached {
                 if let Some(pixels) = &entry.pixels {
-                    if let Some(protocol @ (ImageProtocol::Sixel | ImageProtocol::Iterm)) = protocol
-                    {
+                    if matches!(protocol, ImageProtocol::Sixel | ImageProtocol::Iterm) {
+                        // iTerm scales each band to one terminal row; Sixel requires real pixels.
+                        let cell_size = cell_size
+                            .or_else(|| (protocol == ImageProtocol::Iterm).then_some((8, 16)));
+                        let Some(cell_size) = cell_size else {
+                            placement
+                                .preview
+                                .failed
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            requester.schedule_frame();
+                            continue;
+                        };
                         let geometry = (placement.area.width, placement.total_rows, cell_size);
                         if let Some(rows) = entry
                             .bands

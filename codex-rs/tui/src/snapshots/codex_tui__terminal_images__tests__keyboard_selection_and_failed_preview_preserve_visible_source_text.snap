@@ -1,0 +1,32 @@
+---
+source: tui/src/terminal_images_tests.rs
+expression: "format!(\"Selected image entry:\\n{selected}\\nFailed preview:\\n{buf:?}\")"
+---
+Selected image entry:
+Buffer {
+    area: Rect { x: 0, y: 0, width: 20, height: 4 },
+    content: [
+        "abc                 ",
+        "                    ",
+        "                    ",
+        "                    ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}
+Failed preview:
+Buffer {
+    area: Rect { x: 0, y: 0, width: 20, height: 4 },
+    content: [
+        "abc                 ",
+        "                    ",
+        "                    ",
+        "                    ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 3, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

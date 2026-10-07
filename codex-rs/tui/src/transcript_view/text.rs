@@ -83,7 +83,9 @@ impl TextLayout {
             layout =
                 layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
         }
-        if let Some((image, _, _, _)) = &self.image {
+        if let Some((image, _, _, _)) = &self.image
+            && image.is_available()
+        {
             layout = layout.with_image(Arc::clone(image));
         }
         if self.separated {
@@ -286,15 +288,19 @@ impl TextLayout {
 
     /// Find the display row containing a source position, including omitted wrapping whitespace.
     pub(super) fn row_for_offset(&self, offset: usize) -> usize {
+        let source_rows = self
+            .image
+            .as_ref()
+            .map_or(self.rows.len(), |(_, start, _, _)| *start);
         let before_control = if let Some(control_row) = self.disclosure_row() {
-            let after_control = &self.rows[control_row + 1..];
+            let after_control = &self.rows[control_row + 1..source_rows];
             let matching_rows = after_control.partition_point(|row| row.source.start <= offset);
             if matching_rows > 0 {
                 return control_row + matching_rows;
             }
             control_row
         } else {
-            self.rows.len()
+            source_rows
         };
         self.rows[..before_control]
             .partition_point(|row| row.source.start <= offset)

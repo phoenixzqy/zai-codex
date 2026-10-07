@@ -2,6 +2,7 @@
 
 mod renderer;
 pub(crate) use renderer::ImageRenderer;
+pub(crate) use renderer::raster::cell_size;
 #[cfg(unix)]
 pub(crate) use renderer::raster::cell_size_report;
 #[cfg(unix)]
@@ -71,7 +72,10 @@ pub(crate) fn protocol() -> Option<ImageProtocol> {
 
 impl ImagePreview {
     pub(crate) fn new(path: AbsolutePathBuf) -> Option<Arc<Self>> {
-        protocol()?;
+        let protocol = protocol()?;
+        if protocol == ImageProtocol::Sixel {
+            cell_size()?;
+        }
         let (width, height, revision) = dimensions(path.as_path())?;
         Some(Arc::new(Self {
             path,
@@ -81,6 +85,10 @@ impl ImagePreview {
             failed: AtomicBool::new(/*v*/ false),
             revision,
         }))
+    }
+
+    pub(crate) fn is_available(&self) -> bool {
+        !self.failed.load(Ordering::Relaxed)
     }
 
     /// Approximate terminal cells as twice as tall as they are wide; cap the reserved area.
@@ -161,13 +169,13 @@ impl<T: HistoryCell> HistoryCell for ImageHistoryCell<T> {
     fn transcript_animation_tick(&self) -> Option<u64> {
         self.preview
             .as_ref()
-            .map(|preview| u64::from(preview.failed.load(Ordering::Relaxed)))
+            .and_then(|preview| preview.failed.load(Ordering::Relaxed).then_some(1))
     }
 
     fn image_preview(&self) -> Option<Arc<ImagePreview>> {
         self.preview
             .clone()
-            .filter(|preview| !preview.failed.load(Ordering::Relaxed))
+            .filter(|preview| preview.is_available())
     }
 }
 

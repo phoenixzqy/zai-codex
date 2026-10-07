@@ -19,7 +19,7 @@ use super::field::DOTS;
 
 fn pane() -> BottomPane {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    BottomPane::new(BottomPaneParams {
+    let mut pane = BottomPane::new(BottomPaneParams {
         app_event_tx: AppEventSender::new(tx),
         frame_requester: FrameRequester::test_dummy(),
         has_input_focus: true,
@@ -29,7 +29,9 @@ fn pane() -> BottomPane {
         animations_enabled: true,
         effects: Default::default(),
         skills: None,
-    })
+    });
+    pane.composer.footer.is_wsl = false;
+    pane
 }
 
 fn palette<T>(render: impl FnOnce() -> T) -> T {

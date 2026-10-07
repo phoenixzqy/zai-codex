@@ -1371,8 +1371,12 @@ impl Tui {
             terminal.draw_with_size(screen_size, |frame| {
                 images = draw_fn(frame);
             })?;
-            self.image_renderer
-                .draw(terminal.backend_mut(), &images, &requester)
+            self.image_renderer.draw(
+                terminal.backend_mut(),
+                &images,
+                &requester,
+                crate::terminal_images::cell_size(),
+            )
         })??;
         Ok(())
     }

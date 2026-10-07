@@ -101,3 +101,45 @@ fn invalid_and_oversized_files_keep_text_fallback() {
     file.set_len(MAX_FILE_BYTES + 1).unwrap();
     assert_eq!(dimensions(&path), None);
 }
+
+#[test]
+fn keyboard_selection_and_failed_preview_preserve_visible_source_text() {
+    use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
+    use crossterm::event::KeyModifiers;
+
+    let path = AbsolutePathBuf::try_from(std::env::temp_dir().join("preview.png")).unwrap();
+    let preview = preview(path, /*width*/ 128, /*height*/ 64);
+    let cell = Arc::new(ImageHistoryCell {
+        cell: PlainHistoryCell::new(vec![Line::from("abc")]),
+        preview: Some(Arc::clone(&preview)),
+    });
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![cell];
+    let mut view = TranscriptView::default();
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 20, /*height*/ 4,
+    );
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf, &cells);
+    view.scroll(&cells, /*rows*/ -100);
+    view.render(area, &mut buf, &cells);
+    view.handle_key(
+        KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL),
+        &cells,
+    );
+    for _ in 0..3 {
+        view.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &cells);
+    }
+    view.render(area, &mut buf, &cells);
+    assert_eq!(view.selected_text(&cells).as_deref(), Some("abc"));
+    assert_eq!(view.image_placements()[0].area.y, 1);
+    let selected = format!("{buf:?}");
+    preview.failed.store(true, Ordering::Relaxed);
+    view.render(area, &mut buf, &cells);
+    assert!(view.image_placements().is_empty());
+    assert_eq!(view.selected_text(&cells).as_deref(), Some("abc"));
+    assert_eq!(buf[(0, 0)].symbol(), "a");
+    insta::assert_snapshot!(format!(
+        "Selected image entry:\n{selected}\nFailed preview:\n{buf:?}"
+    ));
+}
