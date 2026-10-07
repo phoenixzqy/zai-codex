@@ -32,7 +32,7 @@ fn wrapped_added_code_keeps_indentation_and_graphemes_when_copied_and_resized() 
 }
 
 #[test]
-fn annotated_diff_preserves_the_existing_hard_wrapped_visual_output() {
+fn annotated_diff_preserves_hard_wrapped_content_with_full_row_backgrounds() {
     let changes = HashMap::from([(
         PathBuf::from("test.rs"),
         FileChange::Add {
@@ -50,6 +50,12 @@ fn annotated_diff_preserves_the_existing_hard_wrapped_visual_output() {
     );
     let mut expected = Buffer::empty(area);
     HyperlinkParagraph::new(&lines, Style::default()).render(area, &mut expected);
+    for (row, line) in lines.iter().enumerate().take(usize::from(area.height)) {
+        expected.set_style(
+            Rect::new(area.x, area.y + row as u16, area.width, /*height*/ 1),
+            line.line.style,
+        );
+    }
     let mut actual = Buffer::empty(area);
     TextLayout::new(lines, /*width*/ 40).render(area, &mut actual, /*start_row*/ 0);
     assert_eq!(actual, expected);
