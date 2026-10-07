@@ -253,8 +253,8 @@ mod tests {
         let auth = GitHubCopilotAuth::new(
             "github-token".to_string(),
             "https://api.individual.githubcopilot.com".to_string(),
-            None,
-            None,
+            /*login*/ None,
+            /*copilot_sku*/ None,
             vec!["gpt-5.6-sol".to_string()],
         )
         .expect("valid GitHub Copilot auth");

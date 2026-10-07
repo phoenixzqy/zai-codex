@@ -449,8 +449,8 @@ fn validate_copilot_api_endpoint(api_endpoint: &str) -> std::io::Result<()> {
     let auth = GitHubCopilotAuth::new(
         "validation-token".to_string(),
         api_endpoint.to_string(),
-        None,
-        None,
+        /*login*/ None,
+        /*copilot_sku*/ None,
         vec!["validation-model".to_string()],
     )?;
     auth.validate_api_endpoint().map(|_| ())

@@ -196,8 +196,8 @@ fn endpoint_validation_rejects_non_copilot_hosts() {
     let error = GitHubCopilotAuth::new(
         "token".to_string(),
         "https://attacker.example/api".to_string(),
-        None,
-        None,
+        /*login*/ None,
+        /*copilot_sku*/ None,
         vec!["gpt-5".to_string()],
     )
     .expect_err("non-Copilot host should be rejected");
@@ -211,7 +211,7 @@ fn github_auth_debug_output_redacts_access_token() {
         "github-secret-token".to_string(),
         "https://api.individual.githubcopilot.com".to_string(),
         Some("octocat".to_string()),
-        None,
+        /*copilot_sku*/ None,
         vec!["gpt-5".to_string()],
     )
     .expect("valid auth");

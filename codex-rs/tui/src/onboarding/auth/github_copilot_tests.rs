@@ -60,7 +60,7 @@ async fn github_copilot_menu_navigation_respects_login_policy() {
         widget.handle_key_event(KeyCode::Down.into());
     }
     assert_eq!(widget.highlighted_mode, SignInOption::GitHubCopilot);
-    insta::assert_snapshot!("github_copilot_menu", render(&widget, 80));
+    insta::assert_snapshot!("github_copilot_menu", render(&widget, /*width*/ 80));
     widget.handle_key_event(KeyCode::Down.into());
     assert_eq!(widget.highlighted_mode, SignInOption::ChatGpt);
     widget.auth_config.forced_login_method = Some(ForcedLoginMethod::Api);
@@ -156,7 +156,7 @@ async fn github_copilot_rpc_handles_success_cancellation_and_start_errors() {
             widget.handle_key_event(KeyCode::Esc.into());
         }
         if scenario == "success" {
-            insta::assert_snapshot!("github_copilot_pending", render(&widget, 80));
+            insta::assert_snapshot!("github_copilot_pending", render(&widget, /*width*/ 80));
         }
         release_tx.send(()).unwrap();
         if scenario == "start_error" {
@@ -179,8 +179,14 @@ async fn github_copilot_rpc_handles_success_cancellation_and_start_errors() {
                 SignInState::GitHubCopilotDeviceCode(_)
             ));
             if scenario == "success" {
-                insta::assert_snapshot!("github_copilot_device_code", render(&widget, 80));
-                insta::assert_snapshot!("github_copilot_device_code_narrow", render(&widget, 44));
+                insta::assert_snapshot!(
+                    "github_copilot_device_code",
+                    render(&widget, /*width*/ 80)
+                );
+                insta::assert_snapshot!(
+                    "github_copilot_device_code_narrow",
+                    render(&widget, /*width*/ 44)
+                );
                 widget.on_account_login_completed(AccountLoginCompletedNotification {
                     login_id: Some("login-1".to_string()),
                     success: true,
@@ -188,7 +194,7 @@ async fn github_copilot_rpc_handles_success_cancellation_and_start_errors() {
                     onboarding_entrypoint: None,
                 });
                 assert_eq!(widget.get_step_state(), StepState::InProgress);
-                insta::assert_snapshot!("github_copilot_success", render(&widget, 80));
+                insta::assert_snapshot!("github_copilot_success", render(&widget, /*width*/ 80));
                 widget.on_account_updated(AccountUpdatedNotification {
                     auth_mode: Some(ApiAuthMode::GitHubCopilot),
                     plan_type: None,
@@ -264,5 +270,5 @@ async fn github_copilot_completion_errors_allow_retry_and_ignore_stale_notificat
             SignInState::PickMode
         ));
     }
-    insta::assert_snapshot!("github_copilot_error", render(&widget, 80));
+    insta::assert_snapshot!("github_copilot_error", render(&widget, /*width*/ 80));
 }
