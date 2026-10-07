@@ -249,7 +249,7 @@ async fn search_rollout_matches_uses_logical_path_for_compressed_rollout() -> an
     compress_now(&rollout_path)?;
 
     let matches = search_rollout_matches(
-        std::path::Path::new("missing-rg-for-test"),
+        &home.path().join("missing-rg-for-test"),
         home.path(),
         /*archived*/ false,
         "search term",

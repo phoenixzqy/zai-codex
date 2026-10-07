@@ -103,8 +103,12 @@ async fn shell_snapshot_concurrent_replays_keep_independent_readers(
         ));
         if deny_fd_path {
             policy.entries.push(FileSystemSandboxEntry::new(
-                PathUri::from_host_native_path("/dev/fd")?.into(),
+                PathUri::from_host_native_path("/dev")?.into(),
                 FileSystemAccessMode::Deny,
+            ));
+            policy.entries.push(FileSystemSandboxEntry::new(
+                PathUri::from_host_native_path("/dev/null")?.into(),
+                FileSystemAccessMode::Write,
             ));
         } else {
             policy.entries.push(FileSystemSandboxEntry::new(
@@ -172,7 +176,7 @@ async fn shell_snapshot_concurrent_replays_keep_independent_readers(
                 collect_process_output_from_events(started.process).await?;
             assert!(
                 output.ends_with(&format!("restored:input-{index}")),
-                "{output:?}"
+                "output={output:?}, errors={errors:?}, status={status:?}, closed={closed}"
             );
             if shell == "zsh" {
                 assert!(

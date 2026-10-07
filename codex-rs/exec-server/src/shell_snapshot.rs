@@ -291,6 +291,11 @@ impl ShellSnapshotCache {
             "{startup}if ! {restore} >/dev/null; then printf 'failed to restore shell snapshot\\n' >&2; fi\n{}",
             params.argv[2]
         );
+        if shell_type == ShellType::Bash {
+            prepared
+                .command
+                .insert(shell_start + 1, "--norc".to_string());
+        }
 
         Ok(reader)
     }

@@ -380,7 +380,8 @@ async fn persisted_remote_plugin_command_attribution_flows_through_turn_context(
     let script_path = write_remote_plugin_script_and_config(codex_home.as_ref());
     std::fs::write(
         &script_path,
-        r#"printf '%s' '{"version":1,"measurements":[{"name":"files_scanned","value":7}]}' > "$CODEX_PLUGIN_METRICS_OUTPUT"
+        r#"test -z "${CODEX_PLUGIN_METRICS_OUTPUT:-}" || exit 2
+printf 'ATTRIBUTION_OK\n'
 "#,
     )?;
     let plugin_root = script_path
@@ -473,6 +474,7 @@ async fn persisted_remote_plugin_command_attribution_flows_through_turn_context(
         "sandboxed plugin command failed: {}",
         end.aggregated_output
     );
+    assert!(end.aggregated_output.contains("ATTRIBUTION_OK"));
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     for (plugin_id, script_path) in [
@@ -490,7 +492,7 @@ async fn persisted_remote_plugin_command_attribution_flows_through_turn_context(
 #[test_case(codex_exec_server::LOCAL_ENVIRONMENT_ID; "local")]
 #[test_case(codex_exec_server::REMOTE_ENVIRONMENT_ID; "remote")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn plugin_metrics_stdin_works_with_sandbox_approval_disabled(
+async fn plugin_stdin_works_without_metrics_with_sandbox_approval_disabled(
     environment_id: &str,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -500,10 +502,9 @@ async fn plugin_metrics_stdin_works_with_sandbox_approval_disabled(
     let script = write_remote_plugin_script_and_config(home.as_ref());
     std::fs::write(
         &script,
-        r#"test -n "${CODEX_PLUGIN_METRICS_OUTPUT:-}" || exit 2
+        r#"test -z "${CODEX_PLUGIN_METRICS_OUTPUT:-}" || exit 2
 IFS= read -r input
 test "$input" = continue || exit 3
-printf '%s' '{"version":1,"measurements":[{"name":"files_scanned","value":7}]}' > "$CODEX_PLUGIN_METRICS_OUTPUT" || exit 4
 printf 'STDIN_OK\n'
 "#,
     )?;

@@ -4037,6 +4037,12 @@ async fn reasoning_up_shortcuts_reach_max_in_default_and_plan_modes() {
             }
 
             if key.code == KeyCode::Char('.') {
+                assert_eq!(
+                    chat.current_reasoning_effort(),
+                    Some(ReasoningEffortConfig::Max)
+                );
+                chat.bottom_pane
+                    .set_active_reasoning_effort_baseline(Some(&ReasoningEffortConfig::Max));
                 let width = 80;
                 let height = chat.desired_height(width);
                 let mut terminal =

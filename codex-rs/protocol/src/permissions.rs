@@ -2515,6 +2515,9 @@ fn protected_metadata_names_for_writable_root(
     root: &AbsolutePathBuf,
     raw_writable_roots: &[&AbsolutePathBuf],
 ) -> Vec<String> {
+    if std::fs::metadata(root.as_path()).is_ok_and(|metadata| !metadata.is_dir()) {
+        return Vec::new();
+    }
     let mut protected_names = Vec::new();
     for metadata_name in PROTECTED_METADATA_PATH_NAMES {
         let mut metadata_paths = vec![root.join(*metadata_name)];
@@ -3454,6 +3457,26 @@ mod tests {
                 cwd.path()
             ));
         }
+    }
+
+    #[test]
+    fn writable_file_roots_have_no_protected_metadata_descendants() {
+        let directory = TempDir::new().expect("temp directory");
+        let file = directory.path().join("marker");
+        fs::write(&file, "marker").expect("write marker");
+        let root = AbsolutePathBuf::from_absolute_path(file).expect("absolute marker");
+        let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
+            root.clone().into(),
+            FileSystemAccessMode::Write,
+        )]);
+        assert_eq!(
+            policy.get_writable_roots_with_cwd_inheriting_root_metadata(directory.path()),
+            vec![WritableRoot {
+                root,
+                read_only_subpaths: Vec::new(),
+                protected_metadata_names: Vec::new(),
+            }]
+        );
     }
 
     #[test]

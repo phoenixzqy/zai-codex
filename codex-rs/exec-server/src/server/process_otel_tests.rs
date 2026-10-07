@@ -1,4 +1,4 @@
-//! Verifies exported lifecycle and network logs retain launch identity without private payloads.
+//! Verifies local lifecycle diagnostics retain launch identity without remote export.
 
 #![allow(clippy::expect_used)]
 
@@ -21,6 +21,9 @@ use codex_otel::OtelProvider;
 use codex_otel::OtelSettings;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_utils_path_uri::PathUri;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::InMemorySpanExporter;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -50,6 +53,11 @@ use crate::rpc::RpcRouter;
 use crate::rpc::RpcServerOutboundMessage;
 use crate::telemetry::ExecutorRegistration;
 
+#[path = "process_local_capture.rs"]
+mod local_capture;
+use local_capture::LocalLogs;
+use local_capture::LocalTelemetry;
+
 const PRIVATE_PAYLOAD: &str = "private-process-payload";
 const TRACE_ID: &str = "11111111111111111111111111111111";
 const LAUNCH_SPANS: [&str; 2] = ["2222222222222222", "3333333333333333"];
@@ -61,10 +69,10 @@ const CALLS: [&str; 2] = ["call-first", "call-second"];
 const LATER_TRACE: &str = "00-44444444444444444444444444444444-5555555555555555-01";
 
 #[test]
-fn exported_process_and_network_logs_keep_the_validated_launch_reference() {
+fn local_process_and_network_logs_keep_the_validated_launch_reference() {
     // Keep the subscriber on the runtime's only thread, including proxy background tasks.
     for (export_traces, registered) in [(false, true), (true, true), (false, false)] {
-        let records = exported_logs(export_traces, |runtime, _, _| {
+        let records = captured_logs(export_traces, |runtime, _, _| {
             runtime.block_on(async {
                 let server = TestServer::new();
                 let mut handlers = Vec::new();
@@ -198,7 +206,7 @@ fn exported_process_and_network_logs_keep_the_validated_launch_reference() {
 #[test]
 fn launch_rpc_span_finishes_before_its_process_exits() {
     let mut observed = None;
-    let records = exported_logs(/*export_traces*/ true, |runtime, otel, collector| {
+    let records = captured_logs(/*export_traces*/ true, |runtime, otel, collector| {
         runtime.block_on(async {
             let server = TestServer::new();
             let (handler, _) = server
@@ -257,7 +265,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
     assert_eq!(
         launch_spans.len(),
         1,
-        "process/start span must export before child exit"
+        "process/start span must finish before child exit"
     );
     let launch_span = launch_spans[0];
     assert_eq!(
@@ -299,7 +307,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
     expected_exit["process.exit_code"] =
         json!({"intValue": exited.exit_code.expect("exit code").to_string()});
     expected_exit["process.termination_requested"] = json!({"boolValue": true});
-    assert_exported_attributes(
+    assert_captured_attributes(
         &records,
         vec![
             expected_process_attributes(
@@ -321,7 +329,7 @@ fn launch_rpc_span_finishes_before_its_process_exits() {
     }
 }
 
-async fn flushed_spans(otel: &OtelProvider, collector: &MockServer) -> Vec<Value> {
+async fn flushed_spans(otel: &LocalTelemetry, _collector: &MockServer) -> Vec<Value> {
     let provider = otel
         .tracer_provider
         .as_ref()
@@ -336,28 +344,24 @@ async fn flushed_spans(otel: &OtelProvider, collector: &MockServer) -> Vec<Value
     .expect("trace flush timeout")
     .expect("trace flush task")
     .expect("trace flush");
-    let mut spans = Vec::new();
-    for request in collector
-        .received_requests()
-        .await
-        .expect("exported requests")
-    {
-        let body: Value = serde_json::from_slice(&request.body).expect("OTLP JSON");
-        let Some(resources) = body["resourceSpans"].as_array() else {
-            continue;
-        };
-        for resource in resources {
-            for scope in resource["scopeSpans"].as_array().expect("scope spans") {
-                spans.extend(scope["spans"].as_array().expect("spans").iter().cloned());
-            }
-        }
-    }
-    spans
+    otel.span_exporter
+        .get_finished_spans()
+        .expect("local spans")
+        .into_iter()
+        .map(|span| {
+            json!({
+                "name": span.name,
+                "traceId": span.span_context.trace_id().to_string(),
+                "spanId": span.span_context.span_id().to_string(),
+                "parentSpanId": span.parent_span_id.to_string(),
+            })
+        })
+        .collect()
 }
 
 #[test]
-fn exported_spawn_failure_keeps_launch_identity_without_outcome_or_error_text() {
-    let records = exported_logs(/*export_traces*/ false, |runtime, _, _| {
+fn local_spawn_failure_keeps_launch_identity_without_outcome_or_error_text() {
+    let records = captured_logs(/*export_traces*/ false, |runtime, _, _| {
         runtime.block_on(async {
             let server = TestServer::new();
             let (handler, _) = server
@@ -385,7 +389,7 @@ fn exported_spawn_failure_keeps_launch_identity_without_outcome_or_error_text() 
             server.sessions.shutdown().await;
         });
     });
-    assert_exported_attributes(
+    assert_captured_attributes(
         &records,
         vec![expected_process_attributes(
             "codex.exec_server.process_spawn_failed",
@@ -397,8 +401,8 @@ fn exported_spawn_failure_keeps_launch_identity_without_outcome_or_error_text() 
 
 #[cfg(target_os = "macos")]
 #[test]
-fn exported_sandbox_denial_keeps_launch_identity_and_separate_exit_outcome() {
-    let records = exported_logs(/*export_traces*/ false, |runtime, _, _| {
+fn local_sandbox_denial_keeps_launch_identity_and_separate_exit_outcome() {
+    let records = captured_logs(/*export_traces*/ false, |runtime, _, _| {
         runtime.block_on(async {
             let server = TestServer::new();
             let (handler, _) = server.new_orchestrator("sandbox-denial-orchestrator", Some("original")).await;
@@ -470,7 +474,7 @@ fn exported_sandbox_denial_keeps_launch_identity_and_separate_exit_outcome() {
     );
     denied["reason"] = json!({"stringValue": "inferred_denial"});
     expected.push(denied);
-    assert_exported_attributes(&records, expected);
+    assert_captured_attributes(&records, expected);
 }
 
 async fn read_until_closed(
@@ -514,7 +518,7 @@ fn expected_process_attributes(name: &str, index: usize, sandbox: &str) -> Value
     })
 }
 
-fn assert_exported_attributes(records: &[Value], mut expected: Vec<Value>) {
+fn assert_captured_attributes(records: &[Value], mut expected: Vec<Value>) {
     let mut actual: Vec<Value> = records
         .iter()
         .map(|record| {
@@ -601,9 +605,9 @@ fn attribute<'a>(record: &'a Value, key: &str) -> Option<&'a str> {
         })
 }
 
-fn exported_logs(
+fn captured_logs(
     export_traces: bool,
-    run: impl FnOnce(&tokio::runtime::Runtime, &OtelProvider, &MockServer),
+    run: impl FnOnce(&tokio::runtime::Runtime, &LocalTelemetry, &MockServer),
 ) -> Vec<Value> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -621,7 +625,7 @@ fn exported_logs(
         protocol: OtelHttpProtocol::Json,
         tls: None,
     };
-    let otel = OtelProvider::try_new(&OtelSettings {
+    let remote_provider = OtelProvider::try_new(&OtelSettings {
         http_client_factory: codex_http_client::HttpClientFactory::new(
             codex_http_client::OutboundProxyPolicy::ReqwestDefault,
         ),
@@ -645,38 +649,44 @@ fn exported_logs(
         span_attributes: BTreeMap::new(),
         tracestate: BTreeMap::new(),
     })
-    .expect("OTEL settings")
-    .expect("OTEL provider");
+    .expect("OTEL settings");
+    assert!(remote_provider.is_none());
+    let span_exporter = InMemorySpanExporter::default();
+    let tracer_provider = export_traces.then(|| {
+        SdkTracerProvider::builder()
+            .with_simple_exporter(span_exporter.clone())
+            .build()
+    });
+    let tracing_layer = tracer_provider.as_ref().map(|provider| {
+        tracing_opentelemetry::layer().with_tracer(provider.tracer("local-process-test"))
+    });
+    let otel = LocalTelemetry {
+        tracer_provider,
+        span_exporter,
+    };
+    let logs = LocalLogs::default();
     let subscriber = tracing_subscriber::registry()
-        .with(otel.tracing_layer())
-        .with(otel.logger_layer());
+        .with(tracing_layer)
+        .with(logs.clone());
     tracing::subscriber::with_default(subscriber, || {
         tracing::callsite::rebuild_interest_cache();
         run(&runtime, &otel, &collector);
     });
-    runtime
-        .block_on(otel.shutdown_with_timeout(Duration::from_secs(5)))
-        .expect("flush OTEL");
-
-    let mut records = Vec::new();
-    for request in runtime
-        .block_on(collector.received_requests())
-        .expect("exported requests")
-    {
-        let body: Value = serde_json::from_slice(&request.body).expect("OTLP JSON");
-        let Some(resources) = body["resourceLogs"].as_array() else {
-            continue;
-        };
-        assert!(!String::from_utf8_lossy(&request.body).contains(PRIVATE_PAYLOAD));
-        for resource in resources {
-            for scope in resource["scopeLogs"].as_array().expect("scope logs") {
-                for record in scope["logRecords"].as_array().expect("log records") {
-                    assert!(record["body"].is_null(), "lifecycle logs have no raw body");
-                    records.push(record.clone());
-                }
-            }
-        }
+    if let Some(provider) = otel.tracer_provider {
+        provider.shutdown().expect("local trace shutdown");
     }
+    assert!(
+        runtime
+            .block_on(collector.received_requests())
+            .expect("collector requests")
+            .is_empty()
+    );
+    let records = logs.0.lock().expect("local logs").clone();
+    assert!(
+        !serde_json::to_string(&records)
+            .expect("local log JSON")
+            .contains(PRIVATE_PAYLOAD)
+    );
     records
 }
 

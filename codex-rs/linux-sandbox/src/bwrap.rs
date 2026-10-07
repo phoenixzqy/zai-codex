@@ -23,6 +23,7 @@ use std::fs::Metadata;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -655,7 +656,14 @@ fn create_filesystem_args(
         let redundant_root_alias =
             binds_file_system_root && root != Path::new("/") && mount_root == Path::new("/");
         if !redundant_root_alias {
-            bwrap_args.args.push("--bind".to_string());
+            let device_file = fs::metadata(mount_root).is_ok_and(|metadata| {
+                metadata.file_type().is_char_device() || metadata.file_type().is_block_device()
+            });
+            bwrap_args.args.push(if device_file {
+                "--dev-bind".to_string()
+            } else {
+                "--bind".to_string()
+            });
             bwrap_args.args.push(path_to_string(mount_root));
             bwrap_args.args.push(path_to_string(mount_root));
             if mount_root == Path::new("/") {
@@ -1387,6 +1395,16 @@ fn append_existing_unreadable_path_args(
                 writable_descendant,
                 unreadable_root,
             );
+            if !writable_descendant.is_dir() {
+                if bwrap_args.preserved_files.is_empty() {
+                    bwrap_args.preserved_files.push(File::open("/dev/null")?);
+                }
+                bwrap_args.args.extend([
+                    "--file".to_string(),
+                    bwrap_args.preserved_files[0].as_raw_fd().to_string(),
+                    path_to_string(writable_descendant),
+                ]);
+            }
         }
         bwrap_args.args.push("--remount-ro".to_string());
         bwrap_args.args.push(path_to_string(unreadable_root));
@@ -2741,6 +2759,19 @@ mod tests {
                     ]
             })
             .expect("allowed file should be rebound writable");
+        let target_create_index = args
+            .args
+            .windows(3)
+            .position(|window| window[0] == "--file" && window[2] == allowed_file_str)
+            .expect("file mount target must exist before its parent becomes read-only");
+        let parent_remount_index = args
+            .args
+            .windows(2)
+            .position(|window| window == ["--remount-ro", blocked_str.as_str()])
+            .expect("denied parent remains read-only");
+        assert!(blocked_none_index < target_create_index);
+        assert!(target_create_index < parent_remount_index);
+        assert!(parent_remount_index < allowed_bind_index);
 
         assert!(
             blocked_none_index < allowed_bind_index,
