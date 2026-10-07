@@ -212,6 +212,17 @@ fn rejects_ambiguous_cur_project_without_a_direct_match() {
 }
 
 #[test]
+fn resolves_project_paths_with_multiple_punctuated_ancestors() {
+    let root = TempDir::new().expect("tempdir");
+    let project = root.path().join("a-b").join("c-d").join("my-project");
+    fs::create_dir_all(&project).expect("project root");
+    assert_eq!(
+        decode_cur_project_path(&encode_project_path(&project)),
+        Some(project),
+    );
+}
+
+#[test]
 fn rejects_ambiguous_cur_project_with_punctuated_ancestor() {
     let root = TempDir::new().expect("tempdir");
     let punctuated_ancestor = root.path().join("a-b").join("c");
