@@ -2,6 +2,7 @@
 
 mod renderer;
 pub(crate) use renderer::ImageRenderer;
+#[cfg(unix)]
 pub(crate) use renderer::raster::cell_size_report;
 #[cfg(unix)]
 pub(crate) use renderer::raster::observe_cell_size;

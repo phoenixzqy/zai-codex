@@ -18,6 +18,7 @@ use super::ImagePlacement;
 static CELL_SIZE: AtomicU32 = AtomicU32::new(/*v*/ 0);
 
 /// Recognize only complete CSI cell-size reports, never modified navigation keys.
+#[cfg(unix)]
 pub(crate) fn cell_size_report(input: &[u8]) -> Option<(usize, u16, u16)> {
     let payload = input.strip_prefix(b"\x1b[6;")?;
     let end = payload
