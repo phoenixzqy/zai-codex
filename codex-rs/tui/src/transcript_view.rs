@@ -87,6 +87,8 @@ struct VisibleRow {
 pub(crate) struct TranscriptView {
     pub(crate) copy_on_select: bool,
     pub(crate) primary_selection: bool,
+    /// Server paths may refer to another filesystem; remote sessions retain text only.
+    pub(crate) local_image_previews: bool,
     position: Position,
     follow_control: follow_control::FollowControl,
     copy_feedback: Option<composer_gap::CopyFeedback>,
@@ -120,6 +122,7 @@ impl Default for TranscriptView {
         Self {
             copy_on_select: false,
             primary_selection: false,
+            local_image_previews: true,
             position: Position::Latest,
             follow_control: follow_control::FollowControl::default(),
             copy_feedback: None,
@@ -165,6 +168,9 @@ impl TranscriptView {
     }
 
     pub(crate) fn image_placements(&self) -> Vec<crate::terminal_images::ImagePlacement> {
+        if !self.local_image_previews {
+            return Vec::new();
+        }
         let mut placements: Vec<crate::terminal_images::ImagePlacement> = Vec::new();
         for (screen_row, visible) in self.visible.iter().enumerate() {
             let Some((image, start, columns, rows)) = &visible.layout.image else {

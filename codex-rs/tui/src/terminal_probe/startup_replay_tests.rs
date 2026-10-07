@@ -66,3 +66,15 @@ fn cell_size_reports_are_filtered_without_changing_pastes() {
     let pasted = b"\x1b[200~\x1b[6;20;10t\x1b[201~";
     assert_eq!(startup_replay_input(pasted), pasted);
 }
+
+#[test]
+fn cell_size_filter_preserves_modified_navigation_and_malformed_reports() {
+    for input in [
+        b"\x1b[6;5~test".as_slice(),
+        b"\x1b[6;0;10t",
+        b"\x1b[6;20;10oops t",
+        b"\x1b[6;20;10",
+    ] {
+        assert_eq!(startup_replay_input(input), input);
+    }
+}

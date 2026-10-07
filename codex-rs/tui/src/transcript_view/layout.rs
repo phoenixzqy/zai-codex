@@ -155,7 +155,7 @@ impl TranscriptView {
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
             expanded,
             disclosure,
-            images: mode == HistoryRenderMode::Rich,
+            images: self.local_image_previews && mode == HistoryRenderMode::Rich,
         };
         let shortcut = self
             .disclosure

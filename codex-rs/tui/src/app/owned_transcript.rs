@@ -43,6 +43,10 @@ impl App {
         let transcript_width = chat_widget.history_wrap_width(width);
         let view = &mut self.transcript_view;
         view.primary_selection = self.right_click_paste_environment.primary;
+        view.local_image_previews = !crate::uses_remote_workspace_or_environment(
+            &self.app_server_target,
+            self.environment_manager.as_ref(),
+        );
         view.copy_on_select = self
             .local_settings
             .copy_on_select(&codex_terminal_detection::terminal_info());

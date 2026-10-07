@@ -2,6 +2,7 @@
 
 mod renderer;
 pub(crate) use renderer::ImageRenderer;
+pub(crate) use renderer::raster::cell_size_report;
 #[cfg(unix)]
 pub(crate) use renderer::raster::observe_cell_size;
 
@@ -38,15 +39,32 @@ pub(crate) struct ImagePreview {
     height: u32,
 }
 
-pub(crate) fn protocol() -> Option<crate::pets::ImageProtocol> {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum ImageProtocol {
+    Kitty,
+    Sixel,
+    Iterm,
+}
+
+pub(crate) fn protocol() -> Option<ImageProtocol> {
     if std::env::var_os("CODEX_TUI_IMAGE_PREVIEWS").as_deref() == Some(std::ffi::OsStr::new("0")) {
         return None;
     }
+    use crate::pets::ImageProtocol as PetProtocol;
+    use crate::pets::PetImageSupport;
+    use crate::pets::PetImageUnsupportedReason;
     match crate::pets::detect_pet_image_support() {
-        crate::pets::PetImageSupport::Unsupported(
-            crate::pets::PetImageUnsupportedReason::Iterm2TooOld,
-        ) => Some(crate::pets::ImageProtocol::KittyLocalFile),
-        support => support.protocol(),
+        PetImageSupport::Supported(PetProtocol::Kitty) => Some(ImageProtocol::Kitty),
+        PetImageSupport::Supported(PetProtocol::Sixel) => Some(ImageProtocol::Sixel),
+        PetImageSupport::Supported(PetProtocol::KittyLocalFile)
+        | PetImageSupport::Unsupported(PetImageUnsupportedReason::Iterm2TooOld) => {
+            Some(ImageProtocol::Iterm)
+        }
+        PetImageSupport::Unsupported(
+            PetImageUnsupportedReason::Tmux
+            | PetImageUnsupportedReason::Zellij
+            | PetImageUnsupportedReason::Terminal,
+        ) => None,
     }
 }
 

@@ -45,13 +45,8 @@ pub(super) fn startup_replay_input(input: &[u8]) -> Vec<u8> {
             continue;
         }
 
-        if input[cursor..].starts_with(b"\x1b[6;")
-            && let Some(end) = input[cursor..]
-                .iter()
-                .take(24)
-                .position(|byte| *byte == b't')
-        {
-            cursor += end + 1;
+        if let Some((length, _, _)) = crate::terminal_images::cell_size_report(&input[cursor..]) {
+            cursor += length;
             continue;
         }
 

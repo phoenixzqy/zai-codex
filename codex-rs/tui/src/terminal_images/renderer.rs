@@ -21,7 +21,7 @@ use super::ImagePlacement;
 use super::ImagePreview;
 use super::MAX_FILE_BYTES;
 use super::MAX_PIXELS;
-use crate::pets::ImageProtocol;
+use crate::terminal_images::ImageProtocol;
 use crate::tui::FrameRequester;
 
 pub(crate) mod raster;
@@ -55,7 +55,8 @@ pub(crate) struct ImageRenderer {
 
 enum PreparedImage {
     Pixels(Option<Arc<Pixels>>),
-    Bands(Option<RasterRows>),
+    Bands(RasterRows),
+    Failed,
 }
 
 impl ImageRenderer {
@@ -97,7 +98,7 @@ impl ImageRenderer {
                 .and_then(|(source, receiver)| match receiver.try_recv() {
                     Ok(pixels) => Some((Arc::clone(source), pixels)),
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        Some((Arc::clone(source), PreparedImage::Pixels(None)))
+                        Some((Arc::clone(source), PreparedImage::Failed))
                     }
                     Err(mpsc::TryRecvError::Empty) => None,
                 });
@@ -113,8 +114,26 @@ impl ImageRenderer {
                 }),
                 PreparedImage::Bands(bands) => {
                     if let Some(entry) = self.cache.iter_mut().find(|entry| entry.id == id) {
-                        entry.bands = bands;
+                        entry.bands = Some(bands);
                     }
+                }
+                PreparedImage::Failed => {
+                    source
+                        .failed
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    if let Some(entry) = self.cache.iter_mut().find(|entry| entry.id == id) {
+                        entry.pixels = None;
+                        entry.bands = None;
+                    } else {
+                        self.cache.push_back(CachedImage {
+                            id,
+                            source,
+                            pixels: None,
+                            uploaded: false,
+                            bands: None,
+                        });
+                    }
+                    requester.schedule_frame();
                 }
             }
             self.pending = None;
@@ -143,8 +162,7 @@ impl ImageRenderer {
                 .and_then(|index| self.cache.remove(index));
             if let Some(mut entry) = cached {
                 if let Some(pixels) = &entry.pixels {
-                    if let Some(protocol @ (ImageProtocol::Sixel | ImageProtocol::KittyLocalFile)) =
-                        protocol
+                    if let Some(protocol @ (ImageProtocol::Sixel | ImageProtocol::Iterm)) = protocol
                     {
                         let geometry = (placement.area.width, placement.total_rows, cell_size);
                         if let Some(rows) = entry
@@ -157,7 +175,9 @@ impl ImageRenderer {
                         } else if self.pending.is_none() {
                             let raster = Arc::clone(&pixels.raster);
                             self.prepare(Arc::clone(&entry.source), requester, move || {
-                                PreparedImage::Bands(RasterRows::new(&raster, geometry, protocol))
+                                RasterRows::new(&raster, geometry, protocol)
+                                    .map(PreparedImage::Bands)
+                                    .unwrap_or(PreparedImage::Failed)
                             });
                         }
                     } else {

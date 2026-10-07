@@ -1,43 +1,45 @@
 //! Cache independently positioned raster bands so clipped previews cannot enter the composer.
 
 use std::io;
+use std::io::Cursor;
 use std::io::Write;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
-use crate::pets::ImageProtocol;
 use base64::Engine;
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use image::imageops::FilterType;
-use std::io::Cursor;
+
+use crate::terminal_images::ImageProtocol;
 
 use super::ImagePlacement;
 
 static CELL_SIZE: AtomicU32 = AtomicU32::new(/*v*/ 0);
 
+/// Recognize only complete CSI cell-size reports, never modified navigation keys.
+pub(crate) fn cell_size_report(input: &[u8]) -> Option<(usize, u16, u16)> {
+    let payload = input.strip_prefix(b"\x1b[6;")?;
+    let end = payload
+        .iter()
+        .take(/*n*/ 12)
+        .position(|byte| *byte == b't')?;
+    let payload = std::str::from_utf8(&payload[..end]).ok()?;
+    let (height, width) = payload.split_once(';')?;
+    if !height.bytes().all(|byte| byte.is_ascii_digit())
+        || !width.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let height = height.parse::<u16>().ok()?;
+    let width = width.parse::<u16>().ok()?;
+    (height > 0 && width > 0).then_some((end + 5, width, height))
+}
+
 #[cfg(unix)]
 pub(crate) fn observe_cell_size(input: &[u8]) {
-    for start in input
-        .windows(/*size*/ 4)
-        .enumerate()
-        .filter_map(|(index, bytes)| (bytes == b"\x1b[6;").then_some(index))
-    {
-        let Some(payload) = input.get(start + 4..).and_then(|bytes| {
-            bytes.get(..bytes.iter().take(/*n*/ 16).position(|byte| *byte == b't')?)
-        }) else {
-            continue;
-        };
-        let Some((height, width)) = std::str::from_utf8(payload)
-            .ok()
-            .and_then(|text| text.split_once(';'))
-        else {
-            continue;
-        };
-        if let (Ok(height), Ok(width)) = (height.parse::<u16>(), width.parse::<u16>())
-            && height > 0
-            && width > 0
-        {
+    for start in 0..input.len() {
+        if let Some((_, width, height)) = cell_size_report(&input[start..]) {
             CELL_SIZE.store(
                 (u32::from(width) << 16) | u32::from(height),
                 Ordering::Relaxed,
@@ -91,7 +93,7 @@ impl RasterRows {
                     u32::from(cell_height),
                 )
                 .to_image();
-                if protocol == ImageProtocol::KittyLocalFile {
+                if protocol == ImageProtocol::Iterm {
                     let mut png = Cursor::new(Vec::new());
                     image::DynamicImage::ImageRgba8(band).write_to(&mut png, image::ImageFormat::Png).ok()?;
                     let png = png.into_inner();

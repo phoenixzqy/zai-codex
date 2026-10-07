@@ -2,6 +2,7 @@ use super::*;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use ratatui::layout::Rect;
+use std::path::Path;
 
 fn image_preview(dir: &Path, id: u32) -> ImagePreview {
     ImagePreview {
@@ -16,8 +17,6 @@ fn image_preview(dir: &Path, id: u32) -> ImagePreview {
         height: 64,
     }
 }
-
-use std::path::Path;
 
 #[tokio::test]
 async fn redraw_reuses_uploaded_pixels_and_deletes_only_own_images() {
@@ -99,7 +98,7 @@ fn corrupt_pixels_never_reach_terminal_and_thumbnail_is_bounded() {
 
 #[tokio::test]
 async fn raster_protocols_reuse_cached_bands_and_clip_to_visible_rows() {
-    for protocol in [ImageProtocol::Sixel, ImageProtocol::KittyLocalFile] {
+    for protocol in [ImageProtocol::Sixel, ImageProtocol::Iterm] {
         let dir = tempfile::tempdir().unwrap();
         let preview = Arc::new(image_preview(dir.path(), /*id*/ 11));
         image::RgbImage::new(/*width*/ 128, /*height*/ 64)
@@ -154,4 +153,91 @@ async fn raster_protocols_reuse_cached_bands_and_clip_to_visible_rows() {
         );
         assert!(renderer.pending.is_none());
     }
+}
+
+#[tokio::test]
+async fn disconnected_preparation_keeps_text_fallback_without_retrying() {
+    let dir = tempfile::tempdir().unwrap();
+    let preview = Arc::new(image_preview(dir.path(), /*id*/ 12));
+    let (sender, receiver) = mpsc::sync_channel(/*bound*/ 1);
+    drop(sender);
+    let mut renderer = ImageRenderer {
+        protocol: Some(ImageProtocol::Sixel),
+        pending: Some((Arc::clone(&preview), receiver)),
+        ..ImageRenderer::default()
+    };
+    let (tx, _) = tokio::sync::broadcast::channel(/*capacity*/ 1);
+    let requester = FrameRequester::new(tx);
+    let placement = ImagePlacement {
+        preview,
+        area: Rect::new(
+            /*x*/ 1, /*y*/ 4, /*width*/ 20, /*height*/ 2,
+        ),
+        first_row: 0,
+        total_rows: 4,
+    };
+    let mut output = Vec::new();
+    renderer
+        .draw(&mut output, std::slice::from_ref(&placement), &requester)
+        .unwrap();
+    renderer
+        .draw(&mut output, std::slice::from_ref(&placement), &requester)
+        .unwrap();
+    assert!(
+        placement
+            .preview
+            .failed
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    assert!(renderer.pending.is_none());
+    assert!(!String::from_utf8(output).unwrap().contains("\x1bP"));
+}
+
+#[tokio::test]
+async fn empty_cache_prepares_pixels_off_thread_and_reuses_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let preview = Arc::new(image_preview(dir.path(), /*id*/ 13));
+    image::RgbImage::new(/*width*/ 128, /*height*/ 64)
+        .save(preview.path.as_path())
+        .unwrap();
+    let mut renderer = ImageRenderer {
+        protocol: Some(ImageProtocol::Kitty),
+        ..ImageRenderer::default()
+    };
+    let (tx, mut frames) = tokio::sync::broadcast::channel(/*capacity*/ 4);
+    let requester = FrameRequester::new(tx);
+    let placement = ImagePlacement {
+        preview,
+        area: Rect::new(
+            /*x*/ 1, /*y*/ 4, /*width*/ 20, /*height*/ 2,
+        ),
+        first_row: 0,
+        total_rows: 4,
+    };
+    let mut output = Vec::new();
+    renderer
+        .draw(&mut output, std::slice::from_ref(&placement), &requester)
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 10), frames.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    output.clear();
+    renderer
+        .draw(&mut output, std::slice::from_ref(&placement), &requester)
+        .unwrap();
+    assert!(
+        String::from_utf8(output.clone())
+            .unwrap()
+            .contains("a=t,t=d")
+    );
+    output.clear();
+    renderer.clear_placements(&mut output).unwrap();
+    renderer
+        .draw(&mut output, &[placement], &requester)
+        .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("a=p,i=13"));
+    assert!(!output.contains("a=t,t=d"));
+    assert!(renderer.pending.is_none());
 }

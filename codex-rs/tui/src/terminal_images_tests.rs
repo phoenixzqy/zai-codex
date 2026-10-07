@@ -74,6 +74,14 @@ fn image_rows_reflow_clip_and_stay_out_of_raw_text() {
         assert!(image.area.bottom() <= area.bottom());
     }
     insta::assert_snapshot!(snapshot);
+    view.local_image_previews = false;
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 12,
+    );
+    view.render(area, &mut Buffer::empty(area), &history);
+    assert!(view.image_placements().is_empty());
+    assert_eq!(history[0].raw_lines(), source);
+    view.local_image_previews = true;
     view.set_presentation(/*detailed*/ false, HistoryRenderMode::Raw);
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 12,
