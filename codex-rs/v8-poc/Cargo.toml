@@ -10,14 +10,13 @@ path = "src/lib.rs"
 doctest = false
 
 [features]
-default = ["sandbox"]
 sandbox = ["v8/v8_enable_sandbox"]
 
 [lints]
 workspace = true
 
 [dependencies]
-v8 = { workspace = true }
+v8 = { workspace = true, features = ["v8_enable_sandbox"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
