@@ -9,7 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 const MAX_CUR_PROJECT_PATH_PROBES: usize = 128;
-const MAX_CUR_PROJECT_DIRECTORY_ENTRIES: usize = 4096;
+const MAX_CUR_PROJECT_DIRECTORY_ENTRIES: usize = 16_384;
 
 pub fn detect_recent_cur_sessions(
     external_agent_home: &Path,

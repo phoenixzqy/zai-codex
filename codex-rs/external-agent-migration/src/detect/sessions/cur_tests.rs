@@ -223,6 +223,36 @@ fn resolves_project_paths_with_multiple_punctuated_ancestors() {
 }
 
 #[test]
+fn resolves_project_paths_with_many_unrelated_siblings() {
+    let root = TempDir::new().expect("tempdir");
+    let project = root.path().join("my-project");
+    fs::create_dir(&project).expect("project root");
+    for index in 0..8192 {
+        fs::write(root.path().join(format!("unrelated-{index}")), "").expect("unrelated sibling");
+    }
+
+    assert_eq!(
+        decode_cur_project_path(&encode_project_path(&project)),
+        Some(project),
+    );
+}
+
+#[test]
+fn rejects_project_paths_when_directory_scan_budget_is_exhausted() {
+    let root = TempDir::new().expect("tempdir");
+    let project = root.path().join("my-project");
+    fs::create_dir(&project).expect("project root");
+    for index in 0..=MAX_CUR_PROJECT_DIRECTORY_ENTRIES {
+        fs::write(root.path().join(format!("unrelated-{index}")), "").expect("unrelated sibling");
+    }
+
+    assert_eq!(
+        decode_cur_project_path(&encode_project_path(&project)),
+        None
+    );
+}
+
+#[test]
 fn rejects_ambiguous_cur_project_with_punctuated_ancestor() {
     let root = TempDir::new().expect("tempdir");
     let punctuated_ancestor = root.path().join("a-b").join("c");
