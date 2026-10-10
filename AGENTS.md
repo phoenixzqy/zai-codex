@@ -1,7 +1,8 @@
 # Local CI: Git pre-push hook
 
-- Hosted GitHub Actions are disabled in `phoenixzqy/zai-codex`; local pre-push
-  validation is the CI gate. Keep this policy when syncing upstream workflows.
+- Local pre-push validation remains the development CI gate. The manually triggered
+  `zai-codex-release.yml` workflow builds and verifies all six native release targets.
+  Other upstream workflows remain disabled in this fork.
 - Install the tracked hook in every clone before pushing:
   `python3 -B .github/scripts/local_ci.py --install` (use `python` on Windows).
   The installer preserves existing custom hook configurations. Linked worktrees
@@ -22,8 +23,8 @@
   Do not bypass it with `--no-verify` or a temporary `core.hooksPath` override.
 - Local CI provides native-host evidence; Linux success does not establish
   Windows or macOS runtime correctness. Hooks cannot enforce browser edits or
-  forge-side merges. Upstream workflows are retained for reference, not run in
-  this fork. Never rely on hosted CI to catch an omitted local check.
+  forge-side merges. Upstream workflows are retained for reference and disabled in
+  this fork; only the custom manual release workflow is enabled. Never rely on hosted CI to catch an omitted local check.
 
 # Branch policy
 
@@ -38,7 +39,8 @@
 - Follow `RELEASING.md` for publishing and updating customized builds.
 - Release from a clean, validated commit on `origin/zai-codex`, never `main`.
   `main` is the upstream mirror, not the release or customization branch.
-- Use `zai-codex-v<version>` website tags and assets on `phoenixzqy/phoenixzqy.github.io`.
+- Publish `zai-codex-v<version>` tags and assets on `phoenixzqy/zai-codex`.
+  The website links the verified source release; legacy website-hosted packages remain supported.
   Reuse the native packager and verified installer; never download an upstream build as a
   substitute for a missing custom release.
 - Keep the short README intro and native Linux, macOS, and Windows install
@@ -46,8 +48,8 @@
   remain available.
 - Package Apache `LICENSE`, `NOTICE`, modification attribution, reviewed
   third-party notices, commit provenance, and SHA-256 sidecars for each asset.
-- Publish only after native validation of each advertised target. Hosted
-  Actions remain disabled; do not enable them to publish a release.
+- Publish only after native validation of each advertised target. The manual
+  release workflow supplies native package verification; it does not replace the local gate.
 
 # Rust/codex-rs
 

@@ -288,6 +288,57 @@ class CustomReleaseTest(unittest.TestCase):
         self.assertEqual(len(urls), 2)
         self.assertTrue(urls[1].endswith(asset.name))
 
+    def test_source_release_url_installs_but_foreign_repository_is_rejected(self):
+        asset = self.make_asset()
+        for repository, accepted in (("zai-codex", True), ("foreign", False)):
+            manifest = {
+                "schemaVersion": 1,
+                "appId": "zai-codex",
+                "release": {
+                    "version": "0.1.0",
+                    "assets": [
+                        {
+                            "platform": "windows" if self.windows else "linux",
+                            "architecture": "x64",
+                            "file": asset.name,
+                            "bytes": asset.stat().st_size,
+                            "sha256": asset.with_name(asset.name + ".sha256")
+                            .read_text()
+                            .strip(),
+                            "url": f"https://github.com/phoenixzqy/{repository}/releases/download/{self.tag}/{asset.name}",
+                        }
+                    ],
+                },
+            }
+
+            def download(url, path):
+                path.write_bytes(
+                    json.dumps(manifest).encode()
+                    if url.endswith("manifest.json")
+                    else asset.read_bytes()
+                )
+
+            with (
+                patch.object(installer, "download", side_effect=download) as fetch,
+                patch.object(installer, "host_target", return_value=self.target),
+                patch.object(
+                    installer.platform,
+                    "system",
+                    return_value="Windows" if self.windows else "Linux",
+                ),
+                patch.object(sys, "argv", ["installer"]),
+                patch.object(installer, "install") as install,
+            ):
+                if accepted:
+                    self.assertEqual(installer.main(), 0)
+                    install.assert_called_once()
+                    self.assertEqual(fetch.call_count, 2)
+                else:
+                    with self.assertRaisesRegex(ValueError, "approved custom release"):
+                        installer.main()
+                    install.assert_not_called()
+                    self.assertEqual(fetch.call_count, 1)
+
     def test_packaging_requires_notices_and_refuses_overwrite(self):
         self.make_asset()
         with self.assertRaisesRegex(ValueError, "already exists"):

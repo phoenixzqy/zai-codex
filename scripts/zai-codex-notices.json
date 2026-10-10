@@ -1,0 +1,10 @@
+{
+  "url": "https://raw.githubusercontent.com/phoenixzqy/phoenixzqy.github.io/ebde5fdf3f06602460ca27d8972e5dd1d0cc6fb6/apps/notices/zai-codex.txt",
+  "sha256": "35bfe56400d8119e86404b1be1a11e3a3849b00d38f6247e4d464a0f7eba1c7b",
+  "dependencyFiles": [
+    "codex-rs/Cargo.lock",
+    "scripts/codex_package/rg",
+    "scripts/codex_package/codex-zsh"
+  ],
+  "dependencySha256": "0ddccfee09726a91622043822b27ecf536da0cb3ef611a9f66708306592db462"
+}

@@ -264,11 +264,14 @@ def main():
         if asset["file"] != name:
             raise ValueError("Custom package filename mismatch")
         url = asset.get("url", urllib.parse.urljoin(manifest_url, name))
-        allowed = f"https://github.com/phoenixzqy/phoenixzqy.github.io/releases/download/{tag}/{name}"
+        allowed = {
+            f"https://github.com/phoenixzqy/{repository}/releases/download/{tag}/{name}"
+            for repository in ("phoenixzqy.github.io", "zai-codex")
+        }
         local = urllib.parse.urljoin(manifest_url, name)
-        if url != allowed and url != local:
+        if url not in allowed and url != local:
             raise ValueError(
-                "Package URL must use the website release or manifest folder"
+                "Package URL must use an approved custom release or manifest folder"
             )
         archive = temporary / name
         download(url, archive)

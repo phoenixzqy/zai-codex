@@ -1,0 +1,101 @@
+name: zai-codex release
+run-name: zai-codex release ${{ inputs.automation_request_id || inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Custom distribution version (major.minor.patch)
+        required: true
+        type: string
+      source_commit:
+        description: Expected zai-codex commit (empty uses dispatch head)
+        type: string
+      automation_request_id:
+        description: Unique request ID for website release recovery
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: zai-codex-release
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'phoenixzqy/zai-codex' && github.ref == 'refs/heads/zai-codex'
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ inputs.version }}
+      EXPECTED_COMMIT: ${{ inputs.source_commit }}
+      TARGET: ${{ matrix.target }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../cargo-target
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Validate dispatch
+        shell: bash
+        run: |
+          python -c 'import os,re; assert re.fullmatch(r"\d+\.\d+\.\d+",os.environ["VERSION"]); assert not os.environ["EXPECTED_COMMIT"] or os.environ["EXPECTED_COMMIT"] == os.environ["GITHUB_SHA"]'
+      - name: Linux native libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libcap-dev clang cmake
+      - name: Prepare reviewed notices
+        shell: bash
+        run: python -B scripts/zai_codex_workflow.py notices --directory "$RUNNER_TEMP/notices"
+      - name: Build and verify native package
+        shell: bash
+        run: |
+          python -B scripts/prepare_zai_codex_release.py --version "$VERSION" --target "$TARGET" --third-party-notices "$RUNNER_TEMP/notices" --output "$RUNNER_TEMP/release-assets"
+          python -B scripts/zai_codex_workflow.py smoke --directory "$RUNNER_TEMP/release-assets" --version "$VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zai-codex-${{ matrix.target }}
+          path: ${{ runner.temp }}/release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: zai-codex-*
+          path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
+      - name: Verify complete matrix and publish immutable release
+        run: python3 -B scripts/zai_codex_workflow.py publish --directory "$RUNNER_TEMP/release-assets" --version "$VERSION" --commit "$GITHUB_SHA"

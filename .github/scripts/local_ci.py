@@ -312,7 +312,7 @@ def validate(root: Path, paths: list[str] | None = None) -> None:
             run_step(root, step, Path(directory))
     print(f"\nLocal validation passed on {platform}.", flush=True)
     print(
-        "This establishes native-host evidence only; hosted Actions are disabled.",
+        "This establishes local native-host evidence; the manual release workflow is separate.",
         flush=True,
     )
     if skipped:
