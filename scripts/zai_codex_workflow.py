@@ -26,7 +26,9 @@ def prepare_notices(output):
     pin = json.loads((ROOT / "scripts/zai-codex-notices.json").read_text())
     fingerprint = hashlib.sha256()
     for name in pin["dependencyFiles"]:
-        fingerprint.update(name.encode() + b"\0" + (ROOT / name).read_bytes() + b"\0")
+        # Git may check out these text inputs as CRLF on Windows.
+        content = (ROOT / name).read_bytes().replace(b"\r\n", b"\n")
+        fingerprint.update(name.encode() + b"\0" + content + b"\0")
     if fingerprint.hexdigest() != pin["dependencySha256"]:
         raise ValueError(
             "Release dependencies changed; review and refresh the notice pin"

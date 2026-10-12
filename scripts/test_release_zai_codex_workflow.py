@@ -49,13 +49,15 @@ class WorkflowReleaseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "scripts").mkdir()
-            (root / "dependency").write_bytes(b"locked")
+            (root / "dependency").write_bytes(b"locked\n")
             body = b"===== third-party-notices/LICENSE.txt =====\nPackages: bundle.zip\n\nReviewed license\n"
             pin = {
                 "url": "https://example.com/notices",
                 "sha256": hashlib.sha256(body).hexdigest(),
                 "dependencyFiles": ["dependency"],
-                "dependencySha256": hashlib.sha256(b"dependency\0locked\0").hexdigest(),
+                "dependencySha256": hashlib.sha256(
+                    b"dependency\0locked\n\0"
+                ).hexdigest(),
             }
             (root / "scripts/zai-codex-notices.json").write_text(json.dumps(pin))
             with (
@@ -67,10 +69,16 @@ class WorkflowReleaseTest(unittest.TestCase):
                 self.assertEqual(
                     (root / "notices/LICENSE.txt").read_text(), "Reviewed license\n"
                 )
+                (root / "dependency").write_bytes(b"locked\r\n")
+                workflow.prepare_notices(root / "windows-notices")
+                self.assertEqual(
+                    (root / "windows-notices/LICENSE.txt").read_text(),
+                    "Reviewed license\n",
+                )
                 (root / "dependency").write_bytes(b"changed")
                 with self.assertRaisesRegex(ValueError, "dependencies changed"):
                     workflow.prepare_notices(root / "other")
-                self.assertEqual(fetch.call_count, 1)
+                self.assertEqual(fetch.call_count, 2)
 
 
 if __name__ == "__main__":
