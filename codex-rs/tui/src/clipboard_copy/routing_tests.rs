@@ -11,6 +11,37 @@ use pretty_assertions::assert_eq;
 use std::cell::RefCell;
 
 #[test]
+fn wsl_forwards_to_terminal_after_native_clipboard_succeeds() {
+    let calls = RefCell::new(Vec::new());
+    let result = copy_to_clipboard_with(
+        "**hello**",
+        CopyFormat::Markdown,
+        CopyEnvironment {
+            ssh_session: false,
+            tmux_session: false,
+            wsl_session: true,
+        },
+        |_| panic!("local WSL must not use tmux"),
+        |text| {
+            assert_eq!(text, "**hello**");
+            calls.borrow_mut().push("osc52");
+            Ok(())
+        },
+        |text, html| {
+            assert_eq!(
+                (text, html),
+                ("**hello**", Some("<p><strong>hello</strong></p>\n"))
+            );
+            calls.borrow_mut().push("native");
+            Ok(Some(ClipboardLease::test()))
+        },
+        |_| panic!("native copy succeeded"),
+    );
+    assert!(matches!(result, Ok(CopyOutcome::Copied(Some(_)))));
+    assert_eq!(calls.into_inner(), vec!["native", "osc52"]);
+}
+
+#[test]
 fn local_tmux_preserves_native_html_when_terminal_silently_rejects_copy() {
     let calls = RefCell::new(Vec::new());
     let result = copy_to_clipboard_with(

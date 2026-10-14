@@ -3,10 +3,12 @@
 //! Local copying uses the native clipboard, with WSL PowerShell as a fallback.
 //! In tmux, also forward to the attached terminal so clients attached after Codex
 //! started receive the copy. Over SSH without tmux, send OSC 52 directly.
+//! In WSL, also forward to the terminal because the Linux clipboard may not sync
+//! with the Windows clipboard even when the native write succeeds.
 //!
 //! Terminal writes have no delivery acknowledgement: a successful send must not
 //! suppress native copying. Both the host and attached client's clipboards may
-//! change. Outside tmux and SSH, use OSC 52 only if native copying fails.
+//! change. Outside tmux, SSH, and WSL, use OSC 52 only if native copying fails.
 //!
 //! On Linux, X11 and some Wayland compositors require the process that wrote the
 //! clipboard to keep its handle open. `ClipboardLease` wraps the `arboard::Clipboard`
@@ -80,8 +82,8 @@ impl CopyStatus {
 
 /// Copy text to the system clipboard.
 ///
-/// Try native copying, then independently attempt terminal forwarding in tmux or
-/// SSH. A terminal send is best effort and does not confirm clipboard delivery.
+/// Try native copying, then independently attempt terminal forwarding in tmux,
+/// SSH, or WSL. A terminal send is best effort and does not confirm clipboard delivery.
 /// Terminal forwarding may replace native HTML with plain text.
 ///
 /// Native or WSL success returns `Copied`, even if terminal forwarding fails.
@@ -210,7 +212,9 @@ fn copy_to_clipboard_with(
     // race with arboard reusing its ownership window and clear the new native data.
     // Persistent tmux sessions may gain remote clients after Codex starts, so still
     // forward even when no SSH variables were inherited or native copying succeeded.
-    let terminal_result = (environment.tmux_session || environment.ssh_session).then(terminal_copy);
+    let terminal_result =
+        (environment.tmux_session || environment.ssh_session || environment.wsl_session)
+            .then(terminal_copy);
     match native_result {
         Ok(lease) => Ok(CopyOutcome::Copied(lease)),
         Err(native_error) => terminal_result
@@ -632,7 +636,7 @@ mod tests {
         let result = copy_to_clipboard_with(
             "hello",
             CopyFormat::PlainText,
-            local_wsl_environment(),
+            local_environment(),
             |_| Ok(()),
             |_| {
                 osc_calls.set(osc_calls.get() + 1);
@@ -749,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn local_wsl_native_failure_uses_powershell_and_skips_osc52_on_success() {
+    fn local_wsl_native_failure_uses_powershell_and_forwards_to_terminal() {
         let osc_calls = Cell::new(/*value*/ 0_u8);
         let native_calls = Cell::new(/*value*/ 0_u8);
         let wsl_calls = Cell::new(/*value*/ 0_u8);
@@ -773,7 +777,7 @@ mod tests {
         );
 
         assert!(matches!(result, Ok(CopyOutcome::Copied(None))));
-        assert_eq!(osc_calls.get(), 0);
+        assert_eq!(osc_calls.get(), 1);
         assert_eq!(native_calls.get(), 1);
         assert_eq!(wsl_calls.get(), 1);
     }
