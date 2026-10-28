@@ -100,6 +100,11 @@ async fn read_amazon_bedrock_runtime_provider_capabilities() -> Result<()> {
 #[tokio::test]
 async fn read_github_copilot_provider_capabilities_from_active_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
+    // The startup worker refreshes models online; this account test must deny all egress.
+    std::fs::write(
+        codex_home.path().join("requirements.toml"),
+        "[application.network]",
+    )?;
     std::fs::write(codex_home.path().join("config.toml"), "")?;
     login_with_github_copilot(
         codex_home.path(),
@@ -116,6 +121,7 @@ async fn read_github_copilot_provider_capabilities_from_active_auth() -> Result<
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_auto_env()
+        .with_env_overrides(&[("CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG", None)])
         .build_initialized_with_timeout(DEFAULT_TIMEOUT)
         .await?;
 

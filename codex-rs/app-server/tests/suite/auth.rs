@@ -276,6 +276,11 @@ async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn github_copilot_auth_overrides_custom_provider_without_exporting_token() -> Result<()> {
     let codex_home = TempDir::new()?;
+    // The startup worker refreshes models online; this account test must deny all egress.
+    std::fs::write(
+        codex_home.path().join("requirements.toml"),
+        "[application.network]",
+    )?;
     create_config_toml_custom_provider(codex_home.path(), /*requires_openai_auth*/ false)?;
     login_with_github_copilot(
         codex_home.path(),
@@ -293,7 +298,10 @@ async fn github_copilot_auth_overrides_custom_provider_without_exporting_token()
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .without_auto_env()
-        .with_env_overrides(&[("OPENAI_API_KEY", Some("ambient-openai-key"))])
+        .with_env_overrides(&[
+            ("OPENAI_API_KEY", Some("ambient-openai-key")),
+            ("CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG", None),
+        ])
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
 

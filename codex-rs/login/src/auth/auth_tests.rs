@@ -155,6 +155,12 @@ fn login_with_github_copilot_writes_only_github_auth() {
     let auth = FileAuthStorage::new(dir.path().to_path_buf())
         .try_read_auth_json(&dir.path().join("auth.json"))
         .expect("auth.json should parse");
+    let generation = auth
+        .github_copilot
+        .as_ref()
+        .and_then(GitHubCopilotAuth::model_cache_generation)
+        .expect("each persisted login should have a model cache generation")
+        .to_string();
     assert_eq!(
         auth,
         AuthDotJson {
@@ -164,7 +170,7 @@ fn login_with_github_copilot_writes_only_github_auth() {
             last_refresh: None,
             agent_identity: None,
             personal_access_token: None,
-            github_copilot: Some(github_auth),
+            github_copilot: Some(github_auth.with_model_cache_generation(Some(generation))),
             bedrock_api_key: None,
             bedrock_access_keys: None,
         }

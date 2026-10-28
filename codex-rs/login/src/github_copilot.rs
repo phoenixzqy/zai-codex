@@ -34,7 +34,7 @@ pub struct GitHubCopilotLoginOptions {
     device_code_url: String,
     access_token_url: String,
     entitlement_url: String,
-    models_url_override: Option<String>,
+    pub(crate) models_url_override: Option<String>,
 }
 
 impl GitHubCopilotLoginOptions {
@@ -213,6 +213,23 @@ pub async fn complete_github_copilot_device_code_login(
         entitlement.endpoints.api,
         entitlement.login,
         entitlement.access_type_sku,
+        models.ids,
+    )
+    .map(|auth| auth.with_model_reasoning_efforts(models.reasoning_efforts))
+}
+
+pub(crate) async fn refresh_github_copilot_auth(
+    options: &GitHubCopilotLoginOptions,
+    auth: &GitHubCopilotAuth,
+) -> std::io::Result<GitHubCopilotAuth> {
+    auth.validate()?;
+    let models =
+        fetch_openai_responses_models(options, auth.access_token(), auth.api_endpoint()).await?;
+    GitHubCopilotAuth::new(
+        auth.access_token().to_string(),
+        auth.api_endpoint().to_string(),
+        auth.login().map(str::to_string),
+        auth.copilot_sku().map(str::to_string),
         models.ids,
     )
     .map(|auth| auth.with_model_reasoning_efforts(models.reasoning_efforts))

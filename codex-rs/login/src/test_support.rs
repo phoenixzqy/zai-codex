@@ -48,3 +48,38 @@ pub fn transport_default_auth_route_config() -> AuthRouteConfig {
         OutboundProxyPolicy::ReqwestDefault,
     ))
 }
+
+/// Creates Copilot refresh options that can send requests only to an IP-loopback fixture.
+pub fn github_copilot_login_options_for_test(
+    models_url: String,
+) -> std::io::Result<crate::GitHubCopilotLoginOptions> {
+    let url = url::Url::parse(&models_url).map_err(std::io::Error::other)?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.host_str().is_some_and(|host| {
+            host.trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+        })
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Copilot test model URL must use an IP-loopback HTTP(S) endpoint",
+        ));
+    }
+    let controller = codex_http_client::NetworkPolicyController::default();
+    let policy = controller.policy();
+    controller.publish(
+        policy.revision(),
+        codex_http_client::DestinationPolicy::Unrestricted,
+    );
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+        .with_network_policy(policy.restrict_to_endpoints([url].into()));
+    let mut options = crate::GitHubCopilotLoginOptions::new(
+        crate::GITHUB_COPILOT_DEFAULT_CLIENT_ID.to_string(),
+        AuthRouteConfig::from_http_client_factory(factory),
+    )?;
+    options.models_url_override = Some(models_url);
+    Ok(options)
+}
