@@ -1629,7 +1629,7 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
         let catalog = provider
             .models_manager_without_cache(/*config_model_catalog*/ None)
             .raw_model_catalog(
-                RefreshStrategy::Online,
+                RefreshStrategy::Offline,
                 HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
             )
             .await;
@@ -1688,7 +1688,7 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
         assert!(provider.api_auth().await.is_err());
         let catalog = models_manager
             .raw_model_catalog(
-                RefreshStrategy::Online,
+                RefreshStrategy::Offline,
                 HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
             )
             .await;
@@ -1705,7 +1705,7 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                 .get_default_model(
                     &Some("configured-model".to_string()),
                     /*allow_provider_model_fallback*/ false,
-                    RefreshStrategy::Online,
+                    RefreshStrategy::Offline,
                     HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
                 )
                 .await,
@@ -1791,7 +1791,7 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
         assert_eq!(
             models_manager
                 .raw_model_catalog(
-                    RefreshStrategy::Online,
+                    RefreshStrategy::Offline,
                     HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
                 )
                 .await

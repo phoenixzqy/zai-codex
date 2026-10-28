@@ -131,7 +131,7 @@ async fn newer_login_supersedes_cached_and_in_flight_metadata_for_the_same_crede
         );
         assert_eq!(std::fs::read(home.path().join("auth.json"))?, credentials);
 
-        let refreshed = auth(&["new-refresh-model"])
+        let refreshed = auth(&["gpt-6.1-terra"])
             .with_model_cache_generation(newer.model_cache_generation().map(str::to_string));
         manager.persist_github_copilot_models(newer, refreshed.clone())?;
         manager.reload().await;

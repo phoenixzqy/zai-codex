@@ -22,6 +22,11 @@ use tokio::time::timeout;
 async fn github_copilot_account_is_visible_without_openai_backend_requests() -> Result<()> {
     let server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
+    // The startup worker refreshes models online; this account test must deny all egress.
+    std::fs::write(
+        codex_home.path().join("requirements.toml"),
+        "[application.network]",
+    )?;
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
@@ -45,6 +50,7 @@ async fn github_copilot_account_is_visible_without_openai_backend_requests() -> 
     )?;
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
+        .with_env_overrides(&[("CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG", None)])
         .build_initialized()
         .await?;
     let request_id = app_server

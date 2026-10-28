@@ -34,7 +34,7 @@ pub struct GitHubCopilotLoginOptions {
     device_code_url: String,
     access_token_url: String,
     entitlement_url: String,
-    models_url_override: Option<String>,
+    pub(crate) models_url_override: Option<String>,
 }
 
 impl GitHubCopilotLoginOptions {

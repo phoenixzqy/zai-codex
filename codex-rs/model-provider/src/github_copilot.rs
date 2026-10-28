@@ -5,8 +5,10 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
+#[cfg(not(test))]
 use codex_login::AuthRouteConfig;
 use codex_login::CodexAuth;
+#[cfg(not(test))]
 use codex_login::GITHUB_COPILOT_DEFAULT_CLIENT_ID;
 use codex_login::GitHubCopilotAuth;
 use codex_login::GitHubCopilotLoginOptions;
@@ -225,6 +227,8 @@ pub(crate) fn github_copilot_aware_models_manager(
                 inner,
                 auth_manager,
                 fallback_to_copilot_default_on_auth_switch,
+                #[cfg(test)]
+                refresh_login_options: None,
             })
         }
         None => inner,
@@ -236,6 +240,8 @@ struct GitHubCopilotAwareModelsManager {
     inner: SharedModelsManager,
     auth_manager: Arc<AuthManager>,
     fallback_to_copilot_default_on_auth_switch: bool,
+    #[cfg(test)]
+    refresh_login_options: Option<GitHubCopilotLoginOptions>,
 }
 
 impl GitHubCopilotAwareModelsManager {
@@ -320,10 +326,15 @@ impl ModelsManager for GitHubCopilotAwareModelsManager {
             // existing startup/periodic worker requests Online refreshes in the background.
             if refresh_strategy == RefreshStrategy::Online
                 && let Err(err) = async {
+                    #[cfg(not(test))]
                     let options = GitHubCopilotLoginOptions::new(
                         GITHUB_COPILOT_DEFAULT_CLIENT_ID.to_string(),
                         AuthRouteConfig::from_http_client_factory(http_client_factory.clone()),
                     )?;
+                    #[cfg(test)]
+                let options = self.refresh_login_options.clone().expect(
+                    "online Copilot unit tests must explicitly configure a loopback models mock",
+                );
                     self.auth_manager
                         .refresh_github_copilot_models(&options)
                         .await
