@@ -13,6 +13,110 @@ use wiremock::matchers::path;
 use super::*;
 
 #[tokio::test]
+async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    let original = GitHubCopilotAuth::new(
+        "github-test-token".to_string(),
+        "https://api.individual.githubcopilot.com".to_string(),
+        Some("octocat".to_string()),
+        Some("copilot_individual".to_string()),
+        vec!["gpt-6.1-sol".to_string()],
+    )?;
+    let options = GitHubCopilotLoginOptions::new(
+        "test-client".to_string(),
+        crate::test_support::transport_default_auth_route_config(),
+    )?
+    .with_test_endpoints(
+        format!("{}/unused", server.uri()),
+        format!("{}/unused", server.uri()),
+        format!("{}/unused", server.uri()),
+        format!("{}/models", server.uri()),
+    );
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(header("authorization", "Bearer github-test-token"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(/*millis*/ 200)).set_body_json(json!({"data": [
+            {"id": "gpt-6.1-sol", "vendor": "OpenAI", "supported_endpoints": ["/responses"]},
+            {"id": "gpt-6.1-terra", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
+             "capabilities": {"supports": {"reasoning_effort": ["low", "high"]}}},
+            {"id": "disabled-model", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
+             "policy": {"state": "disabled"}}
+        ]})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let home = tempfile::tempdir()?;
+    crate::login_with_github_copilot(
+        home.path(),
+        original.clone(),
+        crate::AuthCredentialsStoreMode::File,
+        crate::AuthKeyringBackendKind::default(),
+    )?;
+    let manager = crate::AuthManager::from_auth_for_testing_with_home(
+        crate::CodexAuth::GitHubCopilot(original.clone()),
+        home.path().to_path_buf(),
+    );
+    let refresh = manager.refresh_github_copilot_models(&options);
+    tokio::pin!(refresh);
+    tokio::select! {
+        result = &mut refresh => panic!("refresh unexpectedly finished before cached read: {result:?}"),
+        _ = tokio::time::sleep(Duration::from_millis(/*millis*/ 20)) => {}
+    }
+    assert_eq!(
+        manager.auth_cached(),
+        Some(crate::CodexAuth::GitHubCopilot(original.clone()))
+    );
+    // A concurrent refresh returns immediately and does not issue a duplicate request.
+    manager.refresh_github_copilot_models(&options).await?;
+    refresh.await?;
+    let crate::CodexAuth::GitHubCopilot(refreshed) = manager.auth_cached().unwrap() else {
+        unreachable!()
+    };
+    let expected = GitHubCopilotAuth::new(
+        original.access_token().to_string(),
+        original.api_endpoint().to_string(),
+        original.login().map(str::to_string),
+        original.copilot_sku().map(str::to_string),
+        vec!["gpt-6.1-sol".to_string(), "gpt-6.1-terra".to_string()],
+    )?
+    .with_model_reasoning_efforts(BTreeMap::from([(
+        "gpt-6.1-terra".to_string(),
+        vec![ReasoningEffort::Low, ReasoningEffort::High],
+    )]));
+    assert_eq!(refreshed, expected);
+    assert!(refreshed.same_identity(&original));
+    let cache_path = home.path().join("github_copilot_models.json");
+    let cached = std::fs::read(&cache_path)?;
+
+    server.reset().await;
+    for response in [
+        ResponseTemplate::new(503),
+        ResponseTemplate::new(200).set_body_json(json!({"data": []})),
+        ResponseTemplate::new(200).set_body_string("invalid json"),
+    ] {
+        let mock = Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(response)
+            .expect(1)
+            .mount_as_scoped(&server)
+            .await;
+        assert!(
+            manager
+                .refresh_github_copilot_models(&options)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            manager.auth_cached(),
+            Some(crate::CodexAuth::GitHubCopilot(expected.clone()))
+        );
+        assert_eq!(std::fs::read(&cache_path)?, cached);
+        drop(mock);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn device_flow_discovers_direct_responses_models() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

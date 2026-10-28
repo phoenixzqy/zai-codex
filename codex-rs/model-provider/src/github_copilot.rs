@@ -5,8 +5,11 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
+use codex_login::AuthRouteConfig;
 use codex_login::CodexAuth;
+use codex_login::GITHUB_COPILOT_DEFAULT_CLIENT_ID;
 use codex_login::GitHubCopilotAuth;
+use codex_login::GitHubCopilotLoginOptions;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::ModelsManagerConfig;
 use codex_models_manager::bundled_models_response;
@@ -70,7 +73,7 @@ impl GitHubCopilotModelProvider {
                 AUTH_CHANGED_MESSAGE.to_string(),
             ));
         };
-        if auth != self.expected_auth {
+        if !auth.same_identity(&self.expected_auth) {
             return Err(CodexErr::UnsupportedOperation(
                 AUTH_CHANGED_MESSAGE.to_string(),
             ));
@@ -117,13 +120,10 @@ impl ModelProvider for GitHubCopilotModelProvider {
     }
 
     fn validate_model(&self, model: &str) -> codex_protocol::error::Result<()> {
-        self.current_auth()?;
-        if self
-            .expected_auth
-            .models()
-            .iter()
-            .any(|available| available == model)
-        {
+        let CodexAuth::GitHubCopilot(auth) = self.current_auth()? else {
+            unreachable!("current_auth only returns GitHub Copilot auth")
+        };
+        if auth.models().iter().any(|available| available == model) {
             Ok(())
         } else {
             Err(CodexErr::InvalidRequest(format!(
@@ -310,12 +310,37 @@ impl ModelsManager for GitHubCopilotAwareModelsManager {
         refresh_strategy: RefreshStrategy,
         http_client_factory: HttpClientFactory,
     ) -> ModelsManagerFuture<'_, ModelsResponse> {
-        match self.github_copilot_catalog() {
-            Some(catalog) => Box::pin(async move { catalog }),
-            None => self
+        if self.github_copilot_catalog().is_none() {
+            return self
                 .inner
-                .raw_model_catalog(refresh_strategy, http_client_factory),
+                .raw_model_catalog(refresh_strategy, http_client_factory);
         }
+        Box::pin(async move {
+            // Startup and picker reads use the saved catalog immediately. The app-server's
+            // existing startup/periodic worker requests Online refreshes in the background.
+            if refresh_strategy == RefreshStrategy::Online
+                && let Err(err) = async {
+                    let options = GitHubCopilotLoginOptions::new(
+                        GITHUB_COPILOT_DEFAULT_CLIENT_ID.to_string(),
+                        AuthRouteConfig::from_http_client_factory(http_client_factory.clone()),
+                    )?;
+                    self.auth_manager
+                        .refresh_github_copilot_models(&options)
+                        .await
+                }
+                .await
+            {
+                tracing::warn!(error_kind = ?err.kind(), "GitHub Copilot model catalog refresh failed");
+            }
+            match self.github_copilot_catalog() {
+                Some(catalog) => catalog,
+                None => {
+                    self.inner
+                        .raw_model_catalog(refresh_strategy, http_client_factory)
+                        .await
+                }
+            }
+        })
     }
 
     fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>> {

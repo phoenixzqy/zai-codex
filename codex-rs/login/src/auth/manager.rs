@@ -1,3 +1,5 @@
+#[path = "github_copilot_refresh.rs"]
+mod github_copilot_refresh;
 mod workspace_routing;
 
 use chrono::Utc;
@@ -345,6 +347,15 @@ impl CodexAuth {
                 ));
             };
             auth.validate()?;
+            let cached = github_copilot_refresh::load_model_cache(codex_home, &auth).await;
+            let auth = match cached {
+                Ok(Some(cached)) => cached,
+                Ok(None) => auth,
+                Err(err) => {
+                    tracing::warn!(error_kind = ?err.kind(), "GitHub Copilot model cache unavailable");
+                    auth
+                }
+            };
             return Ok(Self::GitHubCopilot(auth));
         }
         if auth_mode == AuthMode::ApiKey {
@@ -2640,7 +2651,12 @@ impl AuthManager {
                 (AuthMode::PersonalAccessToken, AuthMode::PersonalAccessToken) => a == b,
                 (AuthMode::BedrockApiKey, AuthMode::BedrockApiKey) => a == b,
                 (AuthMode::BedrockAccessKeys, AuthMode::BedrockAccessKeys) => a == b,
-                (AuthMode::GitHubCopilot, AuthMode::GitHubCopilot) => a == b,
+                (AuthMode::GitHubCopilot, AuthMode::GitHubCopilot) => match (a, b) {
+                    (CodexAuth::GitHubCopilot(a), CodexAuth::GitHubCopilot(b)) => {
+                        a.same_identity(b)
+                    }
+                    _ => false,
+                },
                 _ => false,
             },
             _ => false,

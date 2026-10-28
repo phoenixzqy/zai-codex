@@ -5,6 +5,58 @@ use serde_json::json;
 
 use super::model_catalog;
 
+#[tokio::test]
+async fn running_provider_accepts_refreshed_models_but_rejects_a_different_credential()
+-> Result<(), Box<dyn std::error::Error>> {
+    use codex_login::AuthCredentialsStoreMode;
+    use codex_login::AuthKeyringBackendKind;
+    use codex_login::AuthManager;
+    use codex_login::CodexAuth;
+    use codex_login::login_with_github_copilot;
+    use std::sync::Arc;
+
+    let home = tempfile::tempdir()?;
+    let original = GitHubCopilotAuth::new(
+        "github-test-token".to_string(),
+        "https://api.individual.githubcopilot.com".to_string(),
+        Some("octocat".to_string()),
+        Some("copilot_individual".to_string()),
+        vec!["gpt-6.1-sol".to_string()],
+    )?;
+    let manager = AuthManager::from_auth_for_testing_with_home(
+        CodexAuth::GitHubCopilot(original.clone()),
+        home.path().to_path_buf(),
+    );
+    let provider = crate::provider::create_model_provider(
+        codex_model_provider_info::ModelProviderInfo::create_openai_provider(
+            /*base_url*/ None,
+        ),
+        Some(Arc::clone(&manager)),
+    );
+    assert!(provider.validate_model("gpt-6.1-terra").is_err());
+
+    let mut value = serde_json::to_value(original)?;
+    value["models"] = json!(["gpt-6.1-sol", "gpt-6.1-terra"]);
+    login_with_github_copilot(
+        home.path(),
+        serde_json::from_value(value.clone())?,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    manager.reload().await;
+    provider.validate_model("gpt-6.1-terra")?;
+    value["access_token"] = json!("different-token");
+    login_with_github_copilot(
+        home.path(),
+        serde_json::from_value(value)?,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    manager.reload().await;
+    assert!(provider.validate_model("gpt-6.1-terra").is_err());
+    Ok(())
+}
+
 #[test]
 fn catalog_uses_copilot_reasoning_efforts_for_unknown_models() {
     let auth = serde_json::from_value::<GitHubCopilotAuth>(json!({

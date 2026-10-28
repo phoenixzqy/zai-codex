@@ -162,6 +162,14 @@ impl GitHubCopilotAuth {
         &self.models
     }
 
+    /// Compares the credential and inference boundary, excluding refreshable model metadata.
+    pub fn same_identity(&self, other: &Self) -> bool {
+        self.access_token == other.access_token
+            && self.api_endpoint == other.api_endpoint
+            && self.login == other.login
+            && self.copilot_sku == other.copilot_sku
+    }
+
     pub fn reasoning_efforts_for_model(&self, model: &str) -> &[ReasoningEffort] {
         self.model_reasoning_efforts
             .get(model)
