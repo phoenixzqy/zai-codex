@@ -88,6 +88,9 @@ pub struct GitHubCopilotAuth {
     models: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     model_reasoning_efforts: BTreeMap<String, Vec<ReasoningEffort>>,
+    // Binds model caches to one explicit login, including repeated identical logins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_cache_generation: Option<String>,
 }
 
 impl GitHubCopilotAuth {
@@ -137,6 +140,7 @@ impl GitHubCopilotAuth {
                 .filter(|sku| !sku.is_empty()),
             models,
             model_reasoning_efforts: BTreeMap::new(),
+            model_cache_generation: None,
         };
         auth.validate()?;
         Ok(auth)
@@ -160,6 +164,18 @@ impl GitHubCopilotAuth {
 
     pub fn models(&self) -> &[String] {
         &self.models
+    }
+
+    pub(crate) fn model_cache_generation(&self) -> Option<&str> {
+        self.model_cache_generation.as_deref()
+    }
+
+    pub(crate) fn with_model_cache_generation(
+        mut self,
+        model_cache_generation: Option<String>,
+    ) -> Self {
+        self.model_cache_generation = model_cache_generation;
+        self
     }
 
     /// Compares the credential and inference boundary, excluding refreshable model metadata.

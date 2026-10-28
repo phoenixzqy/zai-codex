@@ -32,6 +32,7 @@ fn identity(auth: &GitHubCopilotAuth) -> String {
         Some(auth.api_endpoint()),
         auth.login(),
         auth.copilot_sku(),
+        auth.model_cache_generation(),
     ] {
         match value {
             Some(value) => {
@@ -65,7 +66,13 @@ pub(super) async fn load_model_cache(
         auth.copilot_sku().map(str::to_string),
         cache.models,
     )
-    .map(|auth| Some(auth.with_model_reasoning_efforts(cache.reasoning_efforts)))
+    .map(|cached| {
+        Some(
+            cached
+                .with_model_reasoning_efforts(cache.reasoning_efforts)
+                .with_model_cache_generation(auth.model_cache_generation().map(str::to_string)),
+        )
+    })
 }
 
 impl AuthManager {
@@ -104,6 +111,8 @@ impl AuthManager {
         {
             return Ok(());
         }
+        let refreshed = refreshed
+            .with_model_cache_generation(expected.model_cache_generation().map(str::to_string));
         let cache = ModelCache {
             identity: identity(&refreshed),
             models: refreshed.models().to_vec(),

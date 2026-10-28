@@ -52,6 +52,14 @@ async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::
         crate::AuthCredentialsStoreMode::File,
         crate::AuthKeyringBackendKind::default(),
     )?;
+    let original = crate::load_auth_dot_json(
+        home.path(),
+        crate::AuthCredentialsStoreMode::File,
+        crate::AuthKeyringBackendKind::default(),
+    )?
+    .unwrap()
+    .github_copilot
+    .unwrap();
     let manager = crate::AuthManager::from_auth_for_testing_with_home(
         crate::CodexAuth::GitHubCopilot(original.clone()),
         home.path().to_path_buf(),
@@ -82,7 +90,8 @@ async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::
     .with_model_reasoning_efforts(BTreeMap::from([(
         "gpt-6.1-terra".to_string(),
         vec![ReasoningEffort::Low, ReasoningEffort::High],
-    )]));
+    )]))
+    .with_model_cache_generation(original.model_cache_generation().map(str::to_string));
     assert_eq!(refreshed, expected);
     assert!(refreshed.same_identity(&original));
     let cache_path = home.path().join("github_copilot_models.json");

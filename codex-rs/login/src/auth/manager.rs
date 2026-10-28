@@ -1099,6 +1099,7 @@ pub fn login_with_github_copilot(
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> std::io::Result<()> {
     auth.validate()?;
+    let auth = auth.with_model_cache_generation(Some(format!("{:032x}", rand::random::<u128>())));
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::GitHubCopilot),
         openai_api_key: None,

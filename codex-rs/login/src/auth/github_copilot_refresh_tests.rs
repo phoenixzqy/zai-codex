@@ -18,18 +18,31 @@ fn auth(models: &[&str]) -> GitHubCopilotAuth {
     .unwrap()
 }
 
+fn stored_auth(home: &Path) -> anyhow::Result<GitHubCopilotAuth> {
+    Ok(crate::load_auth_dot_json(
+        home,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?
+    .unwrap()
+    .github_copilot
+    .unwrap())
+}
+
 #[tokio::test]
 async fn refresh_persists_metadata_without_touching_credentials_or_auth_revisions()
 -> anyhow::Result<()> {
     let home = tempdir()?;
     let old = auth(&["gpt-6.1-sol"]);
-    let refreshed = auth(&["gpt-6.1-sol", "gpt-6.1-terra"]);
     login_with_github_copilot(
         home.path(),
         old.clone(),
         AuthCredentialsStoreMode::File,
         AuthKeyringBackendKind::default(),
     )?;
+    let old = stored_auth(home.path())?;
+    let refreshed = auth(&["gpt-6.1-sol", "gpt-6.1-terra"])
+        .with_model_cache_generation(old.model_cache_generation().map(str::to_string));
     let before = std::fs::read(home.path().join("auth.json"))?;
     let manager = AuthManager::from_auth_for_testing_with_home(
         CodexAuth::GitHubCopilot(old.clone()),
@@ -67,6 +80,66 @@ async fn refresh_persists_metadata_without_touching_credentials_or_auth_revision
     manager.reload().await;
     assert_eq!(manager.auth_cached(), Some(CodexAuth::GitHubCopilot(old)));
     assert_eq!(std::fs::read_dir(home.path())?.count(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn newer_login_supersedes_cached_and_in_flight_metadata_for_the_same_credential()
+-> anyhow::Result<()> {
+    for models in [["new-login-model"], ["original-model"]] {
+        let home = tempdir()?;
+        login_with_github_copilot(
+            home.path(),
+            auth(&["original-model"]),
+            AuthCredentialsStoreMode::File,
+            AuthKeyringBackendKind::default(),
+        )?;
+        let original = stored_auth(home.path())?;
+        let manager = AuthManager::from_auth_for_testing_with_home(
+            CodexAuth::GitHubCopilot(original.clone()),
+            home.path().to_path_buf(),
+        );
+        manager.persist_github_copilot_models(original, auth(&["cached-model"]))?;
+        let Some(CodexAuth::GitHubCopilot(cached)) = manager.auth_cached() else {
+            unreachable!()
+        };
+        let stale_manager = AuthManager::from_auth_for_testing_with_home(
+            CodexAuth::GitHubCopilot(cached.clone()),
+            home.path().to_path_buf(),
+        );
+        login_with_github_copilot(
+            home.path(),
+            auth(&models),
+            AuthCredentialsStoreMode::File,
+            AuthKeyringBackendKind::default(),
+        )?;
+        let newer = stored_auth(home.path())?;
+        let credentials = std::fs::read(home.path().join("auth.json"))?;
+        assert!(cached.same_identity(&newer));
+        manager.reload().await;
+        assert_eq!(
+            manager.auth_cached(),
+            Some(CodexAuth::GitHubCopilot(newer.clone()))
+        );
+
+        // A refresh begun before login can finish afterward, but its cache stays ineligible.
+        stale_manager.persist_github_copilot_models(cached, auth(&["late-stale-model"]))?;
+        manager.reload().await;
+        assert_eq!(
+            manager.auth_cached(),
+            Some(CodexAuth::GitHubCopilot(newer.clone()))
+        );
+        assert_eq!(std::fs::read(home.path().join("auth.json"))?, credentials);
+
+        let refreshed = auth(&["new-refresh-model"])
+            .with_model_cache_generation(newer.model_cache_generation().map(str::to_string));
+        manager.persist_github_copilot_models(newer, refreshed.clone())?;
+        manager.reload().await;
+        assert_eq!(
+            manager.auth_cached(),
+            Some(CodexAuth::GitHubCopilot(refreshed))
+        );
+    }
     Ok(())
 }
 
