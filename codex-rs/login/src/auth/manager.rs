@@ -2169,6 +2169,7 @@ pub struct AuthManager {
     chatgpt_base_url: Option<String>,
     agent_identity_authapi_base_url: Option<String>,
     refresh_lock: Semaphore,
+    github_copilot_models_refresh_started: std::sync::atomic::AtomicBool,
     agent_identity_lock: Semaphore,
     agent_identity_bootstrap_cooldown: Mutex<AgentIdentityBootstrapCooldown>,
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
@@ -2326,6 +2327,9 @@ impl AuthManager {
             chatgpt_base_url,
             agent_identity_authapi_base_url,
             refresh_lock: Semaphore::new(/*permits*/ 1),
+            github_copilot_models_refresh_started: std::sync::atomic::AtomicBool::new(
+                /*v*/ false,
+            ),
             agent_identity_lock: Semaphore::new(/*permits*/ 1),
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
@@ -2362,6 +2366,9 @@ impl AuthManager {
             chatgpt_base_url: None,
             agent_identity_authapi_base_url: default_agent_identity_authapi_base_url(),
             refresh_lock: Semaphore::new(/*permits*/ 1),
+            github_copilot_models_refresh_started: std::sync::atomic::AtomicBool::new(
+                /*v*/ false,
+            ),
             agent_identity_lock: Semaphore::new(/*permits*/ 1),
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
@@ -2392,6 +2399,9 @@ impl AuthManager {
             chatgpt_base_url: None,
             agent_identity_authapi_base_url: default_agent_identity_authapi_base_url(),
             refresh_lock: Semaphore::new(/*permits*/ 1),
+            github_copilot_models_refresh_started: std::sync::atomic::AtomicBool::new(
+                /*v*/ false,
+            ),
             agent_identity_lock: Semaphore::new(/*permits*/ 1),
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
@@ -2430,6 +2440,9 @@ impl AuthManager {
                     .to_string(),
             ),
             refresh_lock: Semaphore::new(/*permits*/ 1),
+            github_copilot_models_refresh_started: std::sync::atomic::AtomicBool::new(
+                /*v*/ false,
+            ),
             agent_identity_lock: Semaphore::new(/*permits*/ 1),
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(None),
@@ -2458,6 +2471,9 @@ impl AuthManager {
             chatgpt_base_url: None,
             agent_identity_authapi_base_url: default_agent_identity_authapi_base_url(),
             refresh_lock: Semaphore::new(/*permits*/ 1),
+            github_copilot_models_refresh_started: std::sync::atomic::AtomicBool::new(
+                /*v*/ false,
+            ),
             agent_identity_lock: Semaphore::new(/*permits*/ 1),
             agent_identity_bootstrap_cooldown: Mutex::default(),
             external_auth: RwLock::new(Some(Arc::new(BearerTokenRefresher::new(config)))),

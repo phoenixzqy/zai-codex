@@ -59,6 +59,7 @@ pub use auth::ExternalAuthFuture;
 pub use auth::ExternalAuthRefreshContext;
 pub use auth::ExternalAuthRefreshReason;
 pub use auth::GitHubCopilotAuth;
+mod github_copilot_metadata;
 pub use auth::OPENAI_API_KEY_ENV_VAR;
 pub use auth::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 pub use auth::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
@@ -81,6 +82,7 @@ pub use auth::read_openai_api_key_from_env;
 pub use auth::save_auth;
 pub use auth_env_telemetry::AuthEnvTelemetry;
 pub use auth_env_telemetry::collect_auth_env_telemetry;
+pub use github_copilot_metadata::GitHubCopilotModelMetadata;
 pub use outbound_proxy::AuthRouteConfig;
 pub use token_data::TokenData;
 

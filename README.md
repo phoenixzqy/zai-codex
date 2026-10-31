@@ -5,6 +5,16 @@ A custom [OpenAI Codex](https://github.com/openai/codex) build with GitHub Copil
 ## Fork features
 
 - **GitHub Copilot subscriptions.** Sign in with your own GitHub account and an eligible Copilot subscription.
+  Copilot model IDs, capabilities, and token limits come from your account's catalog.
+  Startup refreshes run in the background; catalogs refresh every five minutes without
+  another login. Failed refreshes retain the last account-scoped cache and emit a local
+  warning. Older credentials without provider limits use a clearly warned 32k operating
+  budget, not a guessed provider maximum, until metadata is available.
+  `model_context_window` selects a total operating budget, capped by the provider's
+  total context maximum. Prompt space is separately capped and reserves advertised
+  maximum output capacity, including during compaction. The default pricing band
+  supplies the initial budget when available; larger overrides can enter Copilot's
+  long-context pricing band. OpenAI and other provider limits are unchanged.
 - **CLI image rendering.** Preview viewed and generated images directly in the terminal with Kitty graphics, Sixel, or iTerm2 image support. Unsupported terminals retain text output.
 - **Remote telemetry and diagnostics disabled.** Telemetry, remote feedback and error-report uploads are disabled; local logs remain available.
 

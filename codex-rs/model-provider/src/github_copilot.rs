@@ -25,6 +25,7 @@ use codex_models_manager::model_info::model_info_from_slug;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::error::CodexErr;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ModelsResponse;
@@ -245,6 +246,30 @@ struct GitHubCopilotAwareModelsManager {
 }
 
 impl GitHubCopilotAwareModelsManager {
+    fn start_catalog_refresh(&self, http_client_factory: HttpClientFactory) {
+        #[cfg(not(test))]
+        let options = GitHubCopilotLoginOptions::new(
+            GITHUB_COPILOT_DEFAULT_CLIENT_ID.to_string(),
+            AuthRouteConfig::from_http_client_factory(http_client_factory),
+        );
+        #[cfg(test)]
+        let options = {
+            let _ = http_client_factory;
+            let Some(options) = self.refresh_login_options.clone() else {
+                return;
+            };
+            Ok::<_, std::io::Error>(options)
+        };
+        match options {
+            Ok(options) => self
+                .auth_manager
+                .start_github_copilot_models_refresh(options),
+            Err(err) => {
+                tracing::warn!(error_kind = ?err.kind(), "GitHub Copilot model refresh setup failed")
+            }
+        }
+    }
+
     fn github_copilot_catalog(&self) -> Option<ModelsResponse> {
         let CodexAuth::GitHubCopilot(auth) = self.auth_manager.auth_cached()? else {
             return None;
@@ -299,6 +324,9 @@ impl ModelsManager for GitHubCopilotAwareModelsManager {
         let manager = StaticModelsManager::new(Some(Arc::clone(&self.auth_manager)), catalog);
         let allow_provider_model_fallback =
             allow_provider_model_fallback || self.fallback_to_copilot_default_on_auth_switch;
+        if refresh_strategy != RefreshStrategy::Offline {
+            self.start_catalog_refresh(http_client_factory.clone());
+        }
         Box::pin(async move {
             manager
                 .get_default_model(
@@ -322,6 +350,9 @@ impl ModelsManager for GitHubCopilotAwareModelsManager {
                 .raw_model_catalog(refresh_strategy, http_client_factory);
         }
         Box::pin(async move {
+            if refresh_strategy == RefreshStrategy::OnlineIfUncached {
+                self.start_catalog_refresh(http_client_factory.clone());
+            }
             // Startup and picker reads use the saved catalog immediately. The app-server's
             // existing startup/periodic worker requests Online refreshes in the background.
             if refresh_strategy == RefreshStrategy::Online
@@ -415,7 +446,39 @@ pub(crate) fn model_catalog(auth: &GitHubCopilotAuth) -> ModelsResponse {
             model.availability_nux = None;
             model.upgrade = None;
             model.use_responses_lite = false;
+            // Bundled prompts/tool conventions remain useful, but are not Copilot limits.
+            model.context_window = Some(32_000);
+            model.max_context_window = None;
+            model.auto_compact_token_limit = None;
+            if let Some(metadata) = auth.model_metadata().get(slug) {
+                model.max_context_window = metadata.max_context_window_tokens;
+                model.context_window = metadata.max_context_window_tokens.map(|maximum| {
+                    metadata.default_max_prompt_tokens.unwrap_or(maximum).min(maximum)
+                }).or(model.context_window);
+                model.provider_limits = Some(metadata.limits.clone());
+                if let Some(vision) = metadata.vision {
+                    model.input_modalities = if vision {
+                        vec![InputModality::Text, InputModality::Image]
+                    } else {
+                        vec![InputModality::Text]
+                    };
+                }
+            }
+            model.used_fallback_model_metadata = model.max_context_window.is_none();
+            if model.used_fallback_model_metadata {
+                tracing::warn!(
+                    model = %slug,
+                    "Copilot catalog has no total context limit; using a conservative 32k operating budget, not a provider maximum"
+                );
+            }
             let copilot_reasoning_efforts = auth.reasoning_efforts_for_model(slug);
+            if copilot_reasoning_efforts.is_empty()
+                && auth.model_metadata().get(slug)
+                    .is_some_and(|metadata| metadata.reasoning_efforts_advertised)
+            {
+                model.supported_reasoning_levels.clear();
+                model.default_reasoning_level = None;
+            }
             if !copilot_reasoning_efforts.is_empty() {
                 let bundled_reasoning_levels =
                     std::mem::take(&mut model.supported_reasoning_levels);

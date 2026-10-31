@@ -38,9 +38,16 @@ async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::
         .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(/*millis*/ 200)).set_body_json(json!({"data": [
             {"id": "gpt-6.1-sol", "vendor": "OpenAI", "supported_endpoints": ["/responses"]},
             {"id": "gpt-6.1-terra", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
-             "capabilities": {"supports": {"reasoning_effort": ["low", "high"]}}},
+             "capabilities": {
+                 "limits": {"max_context_window_tokens": 1050000, "max_prompt_tokens": 922000, "max_output_tokens": 128000},
+                 "supports": {"reasoning_effort": ["low", "high"], "vision": false}
+             }},
             {"id": "disabled-model", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
-             "policy": {"state": "disabled"}}
+             "policy": {"state": "disabled"}},
+            {"id": "no-tools-model", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
+             "capabilities": {"supports": {"tool_calls": false}}},
+            {"id": "no-stream-model", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
+             "capabilities": {"supports": {"streaming": false}}}
         ]})))
         .expect(1)
         .mount(&server)
@@ -91,6 +98,21 @@ async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::
         "gpt-6.1-terra".to_string(),
         vec![ReasoningEffort::Low, ReasoningEffort::High],
     )]))
+    .with_model_metadata(BTreeMap::from([(
+        "gpt-6.1-terra".to_string(),
+        GitHubCopilotModelMetadata {
+            max_context_window_tokens: Some(1_050_000),
+            limits: ProviderModelLimits {
+                max_prompt_tokens: Some(922_000),
+                max_output_tokens: Some(128_000),
+                ..Default::default()
+            },
+            vision: Some(false),
+            reasoning_efforts_advertised: true,
+            supported_endpoints: vec!["/responses".to_string()],
+            ..Default::default()
+        },
+    )]))
     .with_model_cache_generation(original.model_cache_generation().map(str::to_string));
     assert_eq!(refreshed, expected);
     assert!(refreshed.same_identity(&original));
@@ -100,8 +122,11 @@ async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::
     server.reset().await;
     for response in [
         ResponseTemplate::new(503),
-        ResponseTemplate::new(200).set_body_json(json!({"data": []})),
         ResponseTemplate::new(200).set_body_string("invalid json"),
+        ResponseTemplate::new(200).set_body_json(json!({"data": [
+            {"id": "gpt-6.1-terra", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
+             "capabilities": {"limits": {"max_prompt_tokens": -1}}}
+        ]})),
     ] {
         let mock = Mock::given(method("GET"))
             .and(path("/models"))
@@ -122,6 +147,25 @@ async fn refresh_discovers_new_models_and_preserves_the_credential() -> anyhow::
         assert_eq!(std::fs::read(&cache_path)?, cached);
         drop(mock);
     }
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    manager.refresh_github_copilot_models(&options).await?;
+    let disabled = expected.disable_model_catalog();
+    assert_eq!(
+        manager.auth_cached(),
+        Some(crate::CodexAuth::GitHubCopilot(disabled.clone()))
+    );
+    assert!(disabled.models().is_empty());
+    manager.reload().await;
+    assert_eq!(
+        manager.auth_cached(),
+        Some(crate::CodexAuth::GitHubCopilot(disabled))
+    );
     Ok(())
 }
 

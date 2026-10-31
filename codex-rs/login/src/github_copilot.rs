@@ -9,7 +9,9 @@ use serde::Deserialize;
 
 use crate::AuthRouteConfig;
 use crate::GitHubCopilotAuth;
+use crate::GitHubCopilotModelMetadata;
 use crate::default_client::create_raw_auth_client;
+use codex_protocol::openai_models::ProviderModelLimits;
 
 pub const GITHUB_COPILOT_CLIENT_ID_ENV_VAR: &str = "GITHUB_COPILOT_CLIENT_ID";
 /// Public OAuth application ID used by LiteLLM for GitHub Copilot device authorization.
@@ -126,17 +128,47 @@ struct CopilotModel {
     capabilities: Option<CopilotModelCapabilities>,
     supported_endpoints: Option<Vec<String>>,
     policy: Option<CopilotModelPolicy>,
+    billing: Option<CopilotModelBilling>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CopilotModelCapabilities {
     supported_endpoints: Option<Vec<String>>,
     supports: Option<CopilotModelSupports>,
+    limits: Option<CopilotModelTokenLimits>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CopilotModelTokenLimits {
+    max_context_window_tokens: Option<i64>,
+    max_prompt_tokens: Option<i64>,
+    max_output_tokens: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CopilotModelBilling {
+    token_prices: Option<CopilotTokenPrices>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CopilotTokenPrices {
+    default: Option<CopilotPriceBand>,
+    long_context: Option<CopilotPriceBand>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CopilotPriceBand {
+    max_prompt_tokens: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CopilotModelSupports {
     reasoning_effort: Option<Vec<String>>,
+    vision: Option<bool>,
+    tool_calls: Option<bool>,
+    streaming: Option<bool>,
+    parallel_tool_calls: Option<bool>,
+    structured_outputs: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,6 +179,7 @@ struct CopilotModelPolicy {
 struct CopilotOpenAiModels {
     ids: Vec<String>,
     reasoning_efforts: BTreeMap<String, Vec<ReasoningEffort>>,
+    metadata: BTreeMap<String, GitHubCopilotModelMetadata>,
 }
 
 fn default_poll_interval_secs() -> u64 {
@@ -215,7 +248,10 @@ pub async fn complete_github_copilot_device_code_login(
         entitlement.access_type_sku,
         models.ids,
     )
-    .map(|auth| auth.with_model_reasoning_efforts(models.reasoning_efforts))
+    .map(|auth| {
+        auth.with_model_reasoning_efforts(models.reasoning_efforts)
+            .with_model_metadata(models.metadata)
+    })
 }
 
 pub(crate) async fn refresh_github_copilot_auth(
@@ -225,6 +261,10 @@ pub(crate) async fn refresh_github_copilot_auth(
     auth.validate()?;
     let models =
         fetch_openai_responses_models(options, auth.access_token(), auth.api_endpoint()).await?;
+    if models.ids.is_empty() {
+        // A valid empty catalog revokes availability; it is not a transient fetch failure.
+        return Ok(auth.clone().disable_model_catalog());
+    }
     GitHubCopilotAuth::new(
         auth.access_token().to_string(),
         auth.api_endpoint().to_string(),
@@ -232,7 +272,10 @@ pub(crate) async fn refresh_github_copilot_auth(
         auth.copilot_sku().map(str::to_string),
         models.ids,
     )
-    .map(|auth| auth.with_model_reasoning_efforts(models.reasoning_efforts))
+    .map(|auth| {
+        auth.with_model_reasoning_efforts(models.reasoning_efforts)
+            .with_model_metadata(models.metadata)
+    })
 }
 
 async fn poll_for_access_token(
@@ -380,17 +423,11 @@ async fn fetch_openai_responses_models(
         .json::<CopilotModelsResponse>()
         .await
         .map_err(|err| invalid_response("GitHub Copilot model catalog", err))?;
-    let models = openai_responses_models(catalog.data);
-    if models.ids.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "GitHub Copilot did not advertise an enabled OpenAI model with Responses API support",
-        ));
-    }
+    let models = openai_responses_models(catalog.data)?;
     Ok(models)
 }
 
-fn openai_responses_models(models: Vec<CopilotModel>) -> CopilotOpenAiModels {
+fn openai_responses_models(models: Vec<CopilotModel>) -> std::io::Result<CopilotOpenAiModels> {
     let mut models = models
         .into_iter()
         .filter(|model| {
@@ -405,22 +442,77 @@ fn openai_responses_models(models: Vec<CopilotModel>) -> CopilotOpenAiModels {
                     .and_then(|policy| policy.state.as_deref())
                     .is_some_and(|state| state.eq_ignore_ascii_case("disabled"))
                 && model.supports_responses()
+                && !model
+                    .capabilities
+                    .as_ref()
+                    .and_then(|capabilities| capabilities.supports.as_ref())
+                    .is_some_and(|supports| {
+                        supports.tool_calls == Some(false) || supports.streaming == Some(false)
+                    })
         })
         .collect::<Vec<_>>();
     models.sort_by_key(|model| !model.is_chat_default.unwrap_or(false));
     let mut ids = Vec::with_capacity(models.len());
     let mut reasoning_efforts = BTreeMap::new();
+    let mut metadata = BTreeMap::new();
     for model in models {
+        let limits = model
+            .capabilities
+            .as_ref()
+            .and_then(|caps| caps.limits.as_ref());
+        let supports = model
+            .capabilities
+            .as_ref()
+            .and_then(|caps| caps.supports.as_ref());
+        let prices = model
+            .billing
+            .as_ref()
+            .and_then(|billing| billing.token_prices.as_ref());
+        let descriptor = GitHubCopilotModelMetadata {
+            max_context_window_tokens: limits.and_then(|limits| limits.max_context_window_tokens),
+            limits: ProviderModelLimits {
+                max_prompt_tokens: limits.and_then(|limits| limits.max_prompt_tokens),
+                max_output_tokens: limits.and_then(|limits| limits.max_output_tokens),
+                parallel_tool_calls: supports.and_then(|supports| supports.parallel_tool_calls),
+                structured_outputs: supports.and_then(|supports| supports.structured_outputs),
+            },
+            vision: supports.and_then(|supports| supports.vision),
+            tool_calls: supports.and_then(|supports| supports.tool_calls),
+            streaming: supports.and_then(|supports| supports.streaming),
+            reasoning_efforts_advertised: supports
+                .is_some_and(|supports| supports.reasoning_effort.is_some()),
+            default_max_prompt_tokens: prices
+                .and_then(|prices| prices.default.as_ref())
+                .and_then(|band| band.max_prompt_tokens),
+            long_context_max_prompt_tokens: prices
+                .and_then(|prices| prices.long_context.as_ref())
+                .and_then(|band| band.max_prompt_tokens),
+            supported_endpoints: model
+                .supported_endpoints
+                .clone()
+                .or_else(|| {
+                    model
+                        .capabilities
+                        .as_ref()
+                        .and_then(|caps| caps.supported_endpoints.clone())
+                })
+                .unwrap_or_default(),
+        };
+        descriptor.validate()?;
+        if model.capabilities.is_some() || model.billing.is_some() {
+            metadata.insert(model.id.clone(), descriptor);
+        }
         let efforts = model.reasoning_efforts();
         if !efforts.is_empty() {
             reasoning_efforts.insert(model.id.clone(), efforts);
         }
         ids.push(model.id);
     }
-    CopilotOpenAiModels {
+    Ok(CopilotOpenAiModels {
         ids,
         reasoning_efforts,
-    }
+        metadata,
+    })
 }
 
 impl CopilotModel {

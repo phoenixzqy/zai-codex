@@ -399,6 +399,15 @@ const fn is_true(value: &bool) -> bool {
     *value
 }
 
+/// Provider-advertised request constraints, separate from operating-budget selection.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
+pub struct ProviderModelLimits {
+    pub max_prompt_tokens: Option<i64>,
+    pub max_output_tokens: Option<i64>,
+    pub parallel_tool_calls: Option<bool>,
+    pub structured_outputs: Option<bool>,
+}
+
 /// Model metadata returned by the Codex backend `/models` endpoint.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ModelInfo {
@@ -453,6 +462,9 @@ pub struct ModelInfo {
     /// Maximum context window allowed for config overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_context_window: Option<i64>,
+    /// Provider constraints distinct from the user's selected total context budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_limits: Option<ProviderModelLimits>,
     /// Token threshold for automatic compaction. When omitted, core derives it
     /// from `context_window` (90%). When provided, core clamps it to 90% of the
     /// context window when available.
@@ -518,14 +530,29 @@ impl ModelInfo {
     /// Context available to inference after reserving this model's configured headroom.
     pub fn usable_context_window(&self) -> Option<i64> {
         self.resolved_context_window().map(|context_window| {
-            context_window.saturating_mul(self.effective_context_window_percent) / 100
+            let mut usable =
+                context_window.saturating_mul(self.effective_context_window_percent) / 100;
+            if let Some(limits) = &self.provider_limits {
+                if let Some(prompt) = limits.max_prompt_tokens {
+                    usable = usable.min(prompt);
+                }
+                if let Some(output) = limits.max_output_tokens {
+                    usable = usable.min(context_window.saturating_sub(output).max(0));
+                }
+            }
+            usable
         })
     }
 
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
-        let context_limit = self
-            .resolved_context_window()
-            .map(|context_window| (context_window * 9) / 10);
+        let context_limit = self.resolved_context_window().map(|context_window| {
+            let budget = if self.provider_limits.is_some() {
+                self.usable_context_window().unwrap_or(context_window)
+            } else {
+                context_window
+            };
+            budget.saturating_mul(9) / 10
+        });
         let config_limit = self.auto_compact_token_limit;
         if let Some(context_limit) = context_limit {
             return Some(
@@ -1088,6 +1115,7 @@ mod tests {
             supports_image_detail_original: false,
             context_window: None,
             max_context_window: None,
+            provider_limits: None,
             auto_compact_token_limit: None,
             comp_hash: None,
             effective_context_window_percent: 95,

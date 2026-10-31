@@ -5,6 +5,70 @@ use serde_json::json;
 
 use super::model_catalog;
 
+#[test]
+fn copilot_limits_override_bundled_metadata_and_reserve_output_capacity() {
+    for slug in ["gpt-6.1-sol", "new-copilot-model"] {
+        let auth: GitHubCopilotAuth = serde_json::from_value(json!({
+            "access_token": "github-test-token",
+            "api_endpoint": "https://api.individual.githubcopilot.com",
+            "login": null, "copilot_sku": null,
+            "models": [slug],
+            "model_metadata": {slug: {
+                "max_context_window_tokens": 1050000,
+                "limits": {"max_prompt_tokens": 922000, "max_output_tokens": 128000,
+                           "parallel_tool_calls": false, "structured_outputs": true},
+                "vision": false, "tool_calls": true, "streaming": true,
+                "reasoning_efforts_advertised": true,
+                "default_max_prompt_tokens": 272000, "long_context_max_prompt_tokens": 922000,
+                "supported_endpoints": ["/responses"]
+            }}
+        }))
+        .unwrap();
+        let model = model_catalog(&auth).models.remove(/*index*/ 0);
+        assert_eq!(
+            (
+                model.supported_reasoning_levels.clone(),
+                model.default_reasoning_level.clone()
+            ),
+            (Vec::new(), None)
+        );
+        assert_eq!(
+            (
+                model.context_window,
+                model.max_context_window,
+                model.usable_context_window(),
+                model.auto_compact_token_limit(),
+                model.used_fallback_model_metadata,
+                model.input_modalities.clone()
+            ),
+            (
+                Some(272_000),
+                Some(1_050_000),
+                Some(144_000),
+                Some(129_600),
+                false,
+                vec![codex_protocol::openai_models::InputModality::Text]
+            )
+        );
+        for (requested, expected) in [(1_050_000, 922_000), (2_000_000, 922_000), (128_000, 0)] {
+            let config = codex_models_manager::ModelsManagerConfig {
+                model_context_window: Some(requested),
+                model_auto_compact_token_limit: Some(i64::MAX),
+                ..Default::default()
+            };
+            let overridden =
+                codex_models_manager::model_info::with_config_overrides(model.clone(), &config);
+            assert_eq!(
+                (
+                    overridden.usable_context_window(),
+                    overridden.auto_compact_token_limit()
+                ),
+                (Some(expected), Some(expected * 9 / 10))
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn online_catalog_refresh_uses_the_mock_and_updates_the_running_provider()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -99,6 +163,13 @@ async fn online_catalog_refresh_uses_the_mock_and_updates_the_running_provider()
     let mut expected = serde_json::to_value(original)?;
     expected["models"] = json!(["gpt-6.1-sol", "gpt-6.1-terra"]);
     expected["model_reasoning_efforts"] = json!({"gpt-6.1-terra": ["low", "high"]});
+    expected["model_metadata"] = json!({
+        "gpt-6.1-terra": codex_login::GitHubCopilotModelMetadata {
+            supported_endpoints: vec!["/responses".to_string()],
+            reasoning_efforts_advertised: true,
+            ..Default::default()
+        }
+    });
     let expected: GitHubCopilotAuth = serde_json::from_value(expected)?;
     assert_eq!(catalog, model_catalog(&expected));
     assert_eq!(
@@ -118,8 +189,56 @@ async fn online_catalog_refresh_uses_the_mock_and_updates_the_running_provider()
     auth_manager.reload().await;
     assert_eq!(
         auth_manager.auth_cached(),
-        Some(CodexAuth::GitHubCopilot(expected))
+        Some(CodexAuth::GitHubCopilot(expected.clone()))
     );
+    server.verify().await;
+    server.reset().await;
+    Mock::given(method("GET")).and(path("/models"))
+        .respond_with(ResponseTemplate::new(200)
+            .set_delay(std::time::Duration::from_millis(/*millis*/ 200))
+            .set_body_json(json!({"data": [
+                {"id": "gpt-6.1-terra", "vendor": "OpenAI", "supported_endpoints": ["/responses"],
+                 "capabilities": {"limits": {"max_context_window_tokens": 500000,
+                    "max_prompt_tokens": 450000, "max_output_tokens": 50000}}}
+            ]})))
+        .expect(1).mount(&server).await;
+    assert_eq!(
+        manager
+            .raw_model_catalog(
+                RefreshStrategy::OnlineIfUncached,
+                HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+            )
+            .await,
+        model_catalog(&expected)
+    );
+    manager
+        .raw_model_catalog(
+            RefreshStrategy::OnlineIfUncached,
+            HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+        )
+        .await;
+    tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), async {
+        loop {
+            if auth_manager.auth_cached().is_some_and(
+                |auth| matches!(auth, CodexAuth::GitHubCopilot(auth) if auth.models().len() == 1),
+            ) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 10)).await;
+        }
+    })
+    .await?;
+    assert!(provider.validate_model("gpt-6.1-sol").is_err());
+    provider.validate_model("gpt-6.1-terra")?;
+    let catalog = manager.get_remote_models().await;
+    assert_eq!(
+        (
+            catalog[0].max_context_window,
+            catalog[0].usable_context_window()
+        ),
+        (Some(500_000), Some(450_000))
+    );
+    assert_eq!(std::fs::read(home.path().join("auth.json"))?, credentials);
     server.verify().await;
     Ok(())
 }

@@ -71,6 +71,12 @@ pub fn spawn_response_stream(
         let _ = turn_state.set(header_value.to_string());
     }
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
+    let request_id = upstream_request_id.clone().filter(|value| {
+        value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    });
     tokio::spawn(async move {
         if let Some(model) = server_model {
             let _ = tx_event.send(Ok(ResponseEvent::ServerModel(model))).await;
@@ -92,6 +98,7 @@ pub fn spawn_response_stream(
             idle_timeout,
             telemetry,
             safety_buffering_treatment,
+            request_id,
         )
         .await;
     });
@@ -411,6 +418,10 @@ pub fn process_responses_event(
             }
         }
         "response.failed" => {
+            tracing::warn!(
+                top_level_error_present = event.error.is_some(),
+                "Failed Responses event received"
+            );
             return Err(ResponsesEventError::Api(parse_failed_response(
                 event.response,
             )));
@@ -517,16 +528,19 @@ pub async fn process_sse(
         idle_timeout,
         telemetry,
         SafetyBufferingTreatment::default(),
+        /*request_id*/ None,
     )
     .await;
 }
 
+#[tracing::instrument(skip_all, fields(request_id = request_id.as_deref().unwrap_or("unavailable")))]
 async fn process_sse_with_treatment(
     stream: ByteStream,
     tx_event: mpsc::Sender<Result<ResponseEvent, ApiError>>,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     safety_buffering_treatment: SafetyBufferingTreatment,
+    request_id: Option<String>,
 ) {
     let mut stream = stream.eventsource();
     let mut response_error: Option<ApiError> = None;

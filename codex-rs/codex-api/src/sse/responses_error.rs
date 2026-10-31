@@ -23,6 +23,14 @@ struct Error {
 }
 
 pub(super) fn parse_failed_response(response: Option<Value>) -> ApiError {
+    let error_value = response.as_ref().and_then(|response| response.get("error"));
+    tracing::warn!(
+        response_shape = value_shape(response.as_ref()),
+        error_shape = value_shape(error_value),
+        code_shape = value_shape(error_value.and_then(|error| error.get("code"))),
+        message_shape = value_shape(error_value.and_then(|error| error.get("message"))),
+        "Responses backend reported failure; payload text omitted to protect private content"
+    );
     if let Some(error) = response
         .as_ref()
         .and_then(|response| response.get("error"))
@@ -90,6 +98,18 @@ pub(super) fn parse_failed_response(response: Option<Value>) -> ApiError {
             message: error.message.unwrap_or_default(),
             retry_after: None,
         },
+    }
+}
+
+fn value_shape(value: Option<&Value>) -> &'static str {
+    match value {
+        None => "missing",
+        Some(Value::Null) => "null",
+        Some(Value::Bool(_)) => "boolean",
+        Some(Value::Number(_)) => "number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "array",
+        Some(Value::Object(_)) => "object",
     }
 }
 

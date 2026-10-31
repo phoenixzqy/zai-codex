@@ -644,6 +644,7 @@ fn remote_model_with_auto_review_override(slug: &str, review_model: &str) -> Mod
         supports_image_detail_original: false,
         context_window: Some(272_000),
         max_context_window: None,
+        provider_limits: None,
         guardian: None,
         auto_compact_token_limit: None,
         comp_hash: None,

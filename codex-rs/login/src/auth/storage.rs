@@ -88,6 +88,10 @@ pub struct GitHubCopilotAuth {
     models: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     model_reasoning_efforts: BTreeMap<String, Vec<ReasoningEffort>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    model_metadata: BTreeMap<String, crate::GitHubCopilotModelMetadata>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    model_catalog_disabled: bool,
     // Binds model caches to one explicit login, including repeated identical logins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_cache_generation: Option<String>,
@@ -140,6 +144,8 @@ impl GitHubCopilotAuth {
                 .filter(|sku| !sku.is_empty()),
             models,
             model_reasoning_efforts: BTreeMap::new(),
+            model_metadata: BTreeMap::new(),
+            model_catalog_disabled: false,
             model_cache_generation: None,
         };
         auth.validate()?;
@@ -163,7 +169,26 @@ impl GitHubCopilotAuth {
     }
 
     pub fn models(&self) -> &[String] {
+        if self.model_catalog_disabled {
+            &[]
+        } else {
+            &self.models
+        }
+    }
+
+    pub(crate) fn disable_model_catalog(mut self) -> Self {
+        self.model_catalog_disabled = true;
+        self.model_metadata.clear();
+        self.model_reasoning_efforts.clear();
+        self
+    }
+
+    pub(crate) fn saved_models(&self) -> &[String] {
         &self.models
+    }
+
+    pub(crate) fn model_catalog_disabled(&self) -> bool {
+        self.model_catalog_disabled
     }
 
     pub(crate) fn model_cache_generation(&self) -> Option<&str> {
@@ -191,6 +216,21 @@ impl GitHubCopilotAuth {
             .get(model)
             .map(Vec::as_slice)
             .unwrap_or_default()
+    }
+
+    pub fn model_metadata(&self) -> &BTreeMap<String, crate::GitHubCopilotModelMetadata> {
+        &self.model_metadata
+    }
+
+    pub(crate) fn with_model_metadata(
+        mut self,
+        metadata: BTreeMap<String, crate::GitHubCopilotModelMetadata>,
+    ) -> Self {
+        self.model_metadata = metadata
+            .into_iter()
+            .filter(|(model, _)| self.models.contains(model))
+            .collect();
+        self
     }
 
     pub(crate) fn with_model_reasoning_efforts(
@@ -232,6 +272,9 @@ impl GitHubCopilotAuth {
             ));
         }
         self.validate_api_endpoint()?;
+        for metadata in self.model_metadata.values() {
+            metadata.validate()?;
+        }
         Ok(())
     }
 

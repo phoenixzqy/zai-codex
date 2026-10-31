@@ -23,6 +23,10 @@ struct ModelCache {
     identity: String,
     models: Vec<String>,
     reasoning_efforts: BTreeMap<String, Vec<ReasoningEffort>>,
+    #[serde(default)]
+    metadata: BTreeMap<String, crate::GitHubCopilotModelMetadata>,
+    #[serde(default)]
+    disabled: bool,
 }
 
 fn identity(auth: &GitHubCopilotAuth) -> String {
@@ -66,16 +70,51 @@ pub(super) async fn load_model_cache(
         auth.copilot_sku().map(str::to_string),
         cache.models,
     )
-    .map(|cached| {
-        Some(
+    .and_then(|cached| {
+        let cached = cached
+            .with_model_reasoning_efforts(cache.reasoning_efforts)
+            .with_model_metadata(cache.metadata)
+            .with_model_cache_generation(auth.model_cache_generation().map(str::to_string));
+        let cached = if cache.disabled {
+            cached.disable_model_catalog()
+        } else {
             cached
-                .with_model_reasoning_efforts(cache.reasoning_efforts)
-                .with_model_cache_generation(auth.model_cache_generation().map(str::to_string)),
-        )
+        };
+        cached.validate()?;
+        Ok(Some(cached))
     })
 }
 
 impl AuthManager {
+    /// Starts one bounded background catalog worker per auth manager, including standalone CLI.
+    pub fn start_github_copilot_models_refresh(
+        self: &Arc<Self>,
+        options: GitHubCopilotLoginOptions,
+    ) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if self
+            .github_copilot_models_refresh_started
+            .swap(/*val*/ true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
+        let manager = Arc::downgrade(self);
+        runtime.spawn(async move {
+            loop {
+                let Some(auth_manager) = manager.upgrade() else {
+                    break;
+                };
+                if let Err(err) = auth_manager.refresh_github_copilot_models(&options).await {
+                    tracing::warn!(error_kind = ?err.kind(), "GitHub Copilot background model refresh failed; retaining cached metadata");
+                }
+                drop(auth_manager);
+                tokio::time::sleep(Duration::from_secs(/*secs*/ 300)).await;
+            }
+        });
+    }
+
     /// Refreshes the Copilot catalog without rewriting credentials or blocking cached reads.
     /// Failed refreshes preserve the last catalog; overlapping refreshes are coalesced.
     pub async fn refresh_github_copilot_models(
@@ -115,7 +154,7 @@ impl AuthManager {
             .with_model_cache_generation(expected.model_cache_generation().map(str::to_string));
         let cache = ModelCache {
             identity: identity(&refreshed),
-            models: refreshed.models().to_vec(),
+            models: refreshed.saved_models().to_vec(),
             reasoning_efforts: refreshed
                 .models()
                 .iter()
@@ -126,6 +165,8 @@ impl AuthManager {
                     )
                 })
                 .collect(),
+            metadata: refreshed.model_metadata().clone(),
+            disabled: refreshed.model_catalog_disabled(),
         };
         std::fs::create_dir_all(&self.codex_home)?;
         let temporary = self.codex_home.join(format!(

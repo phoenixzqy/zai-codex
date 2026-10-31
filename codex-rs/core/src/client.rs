@@ -342,6 +342,7 @@ fn responses_request_properties_match(
 ) -> bool {
     let ResponsesApiRequest {
         model: previous_model,
+        max_output_tokens: previous_max_output_tokens,
         instructions: previous_instructions,
         input: _,
         tools: previous_tools,
@@ -360,6 +361,7 @@ fn responses_request_properties_match(
     } = previous;
     let ResponsesApiRequest {
         model: current_model,
+        max_output_tokens: current_max_output_tokens,
         instructions: current_instructions,
         input: _,
         tools: current_tools,
@@ -378,6 +380,7 @@ fn responses_request_properties_match(
     } = current;
 
     previous_model == current_model
+        && previous_max_output_tokens == current_max_output_tokens
         && previous_instructions == current_instructions
         && previous_tools == current_tools
         && previous_tool_choice == current_tool_choice
@@ -918,6 +921,21 @@ impl ModelClient {
         include_internal: bool,
     ) -> Result<ResponsesApiRequest> {
         self.state.provider.validate_model(&model_info.slug)?;
+        if model_info.provider_limits.is_some() && model_info.usable_context_window() == Some(0) {
+            return Err(CodexErr::InvalidRequest(
+                "The selected context budget leaves no prompt space after reserving provider output capacity".to_string(),
+            ));
+        }
+        if prompt.output_schema.is_some()
+            && model_info
+                .provider_limits
+                .as_ref()
+                .is_some_and(|limits| limits.structured_outputs == Some(false))
+        {
+            return Err(CodexErr::InvalidRequest(
+                "The selected model does not support structured outputs".to_string(),
+            ));
+        }
         let mut input = prompt.get_formatted_input_for_request(model_info);
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.
@@ -1014,11 +1032,20 @@ impl ModelClient {
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
             model: model_info.slug.clone(),
+            max_output_tokens: model_info
+                .provider_limits
+                .as_ref()
+                .and_then(|limits| limits.max_output_tokens),
             instructions,
             input,
             tools,
             tool_choice: "auto".to_string(),
-            parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
+            parallel_tool_calls: prompt.parallel_tool_calls
+                && !model_info.use_responses_lite
+                && model_info
+                    .provider_limits
+                    .as_ref()
+                    .is_none_or(|limits| limits.parallel_tool_calls != Some(false)),
             reasoning: Some(reasoning),
             store: false,
             stream: true,
